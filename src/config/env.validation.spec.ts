@@ -4,6 +4,7 @@ const base = {
   DATABASE_URL: 'postgresql://x@localhost:5433/db',
   CORS_ORIGIN: 'http://localhost:5173',
   REDIS_URL: 'redis://localhost:6379',
+  JWT_ACCESS_SECRET: 'x'.repeat(32),
 };
 
 describe('envSchema', () => {

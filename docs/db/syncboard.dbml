@@ -1,0 +1,380 @@
+// SyncBoard — sơ đồ database. Dán toàn bộ file vào https://dbdiagram.io/d để xem.
+// Chép tay từ prisma/schema.prisma (nguồn thật) ngày 2026-10-26. Sửa schema thì cập nhật file này.
+// Số trong ngoặc (1.7, 6.4...) là mã tính năng trong "SyncBoard — Phân tích thiết kế.md".
+
+Project SyncBoard {
+  database_type: 'PostgreSQL'
+  Note: '''
+  Bảng trắng vẽ chung realtime. Mọi thay đổi là một operation: elements giữ trạng thái hiện tại,
+  operations giữ nhật ký. Dữ liệu tạm (ai online, con trỏ, khóa mềm, đồng hồ) nằm ở Redis, không có bảng.
+  Quy ước: id là UUID v7 do Prisma sinh; xóa mềm bằng deleted_at / is_deleted; token đăng nhập chỉ lưu sha256.
+  '''
+}
+
+// ───────────────────────── Enums ─────────────────────────
+
+Enum "BoardRole" {
+  OWNER
+  EDITOR
+  COMMENTER
+  VIEWER [note: 'Quyền trên một bảng (8.1). Share link chỉ cấp EDITOR/COMMENTER/VIEWER']
+}
+
+Enum "OAuthProvider" {
+  GOOGLE
+}
+
+Enum "VerificationTokenType" {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+Enum "NotificationType" {
+  MENTION [note: 'Bị @ trong bình luận (5.2)']
+  COMMENT_REPLY
+  BOARD_INVITATION
+  ROLE_CHANGED
+}
+
+// ───────────────────────── Lõi bảng vẽ ─────────────────────────
+
+Table boards [headercolor: #3498DB] {
+  id uuid [pk]
+  title text [not null, default: 'Untitled']
+  owner_id uuid [note: 'null = bảng tạo khi chưa có tài khoản, ai có link cũng sửa được']
+  last_seq integer [not null, default: 0, note: 'Bộ đếm op của bảng. UPDATE ... last_seq + n RETURNING trong transaction: khóa dòng làm op của một bảng chạy tuần tự kể cả từ nhiều server']
+  created_at timestamp [not null, default: `now()`]
+  updated_at timestamp [not null]
+  deleted_at timestamp [note: 'Xóa mềm (6.2)']
+
+  indexes {
+    owner_id
+  }
+  Note: 'Một bảng vẽ. Tạo bảng (1.1), đổi tên / xóa / "bảng của tôi" (6.2)'
+}
+
+Table elements [headercolor: #3498DB] {
+  board_id uuid [not null]
+  id text [not null, note: 'Client tự sinh để vẽ ngay không chờ server; chỉ cần duy nhất trong một bảng']
+  type text [not null, note: 'freedraw, rect, ellipse, diamond, line, arrow, text, sticky, image, frame, stamp']
+  data jsonb [not null, note: 'Trường riêng theo type: x, y, points, text, color, assetId, startBinding... (4.2)']
+  z_index text [not null, note: 'Fractional index (4.4). COLLATE "C" để sắp theo byte (viết tay trong migration)']
+  version integer [not null, default: 0, note: 'Tăng mỗi lần sửa; client gửi baseVersion để phát hiện xung đột (7.2)']
+  is_deleted boolean [not null, default: false, note: 'Xóa mềm: undo, khôi phục, người rớt mạng vẫn biết đã xóa']
+  locked boolean [not null, default: false, note: 'Khóa hình (2.12)']
+  group_id text [note: 'Nhóm (2.6)']
+  frame_id text [note: 'Nằm trong frame (5.7)']
+  updated_by text [not null, note: 'userId hoặc clientId của khách']
+  updated_at timestamp [not null]
+
+  indexes {
+    (board_id, id) [pk]
+  }
+  Note: '''
+  Trạng thái HIỆN TẠI của mọi thứ trên bảng: nét vẽ, hình, chữ, sticky, ảnh, mũi tên, frame, stamp.
+  Phục vụ 1.2–1.3, 1.6 (F5), 1.7, toàn bộ cấp 2, 4.7, 5.4, 5.7, 7.2.
+  Index viết tay: elements_board_id_active_idx ON (board_id) WHERE is_deleted = false (tải bảng nhanh).
+  '''
+}
+
+Table operations [headercolor: #3498DB] {
+  board_id uuid [not null]
+  seq integer [not null, note: 'Server cấp 1, 2, 3... theo từng bảng']
+  op_id uuid [not null, note: 'Client sinh; gửi lại nhiều lần vẫn chỉ ghi một lần (idempotent)']
+  type text [not null, note: 'add, update, delete, restore, reorder, clear']
+  element_id text
+  payload jsonb [not null, note: 'Op ĐÃ resolve: zIndex đã tính, deletedIds của clear...']
+  actor text [not null]
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    (board_id, seq) [pk, note: 'Lấy "mọi op sau seq N" khi kết nối lại']
+    (board_id, op_id) [unique, note: 'Chống ghi trùng']
+  }
+  Note: 'Nhật ký thao tác, chỉ ghi thêm. Gửi bù khi mất mạng (4.8), undo xóa sạch (1.7), lịch sử (6.5)'
+}
+
+Table assets [headercolor: #3498DB] {
+  id uuid [pk]
+  board_id uuid [not null]
+  storage_key text [not null, unique, note: 'Đường dẫn trong storage (ổ đĩa / S3), server tự sinh']
+  mime_type text [not null]
+  size_bytes integer [not null, note: 'Tối đa 10 MB']
+  width integer
+  height integer
+  checksum text [not null, note: 'sha256: phát hiện file trùng, kiểm tra toàn vẹn']
+  uploaded_by text [not null]
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    board_id
+    (board_id, checksum)
+  }
+  Note: 'Metadata ảnh upload (2.10, 7.4). File nằm ở storage, op chỉ mang assetId'
+}
+
+// ───────────────────────── Tài khoản ─────────────────────────
+
+Table users [headercolor: #27AE60] {
+  id uuid [pk]
+  email text [not null, unique, note: 'Lưu chữ thường']
+  email_verified_at timestamp
+  display_name text [not null]
+  avatar_url text
+  password_hash text [note: 'argon2id; null nếu chỉ đăng nhập bằng OAuth']
+  preferences jsonb [not null, default: '{}', note: 'Ví dụ { theme: "dark" } (3.6, 3.7)']
+  created_at timestamp [not null, default: `now()`]
+  updated_at timestamp [not null]
+  deleted_at timestamp [note: 'Xóa mềm tài khoản']
+
+  Note: 'Tài khoản (6.1)'
+}
+
+Table oauth_accounts [headercolor: #27AE60] {
+  id uuid [pk]
+  user_id uuid [not null]
+  provider "OAuthProvider" [not null]
+  provider_account_id text [not null, note: '"sub" của Google']
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    (provider, provider_account_id) [unique]
+    user_id
+  }
+  Note: 'Đăng nhập Google (6.1). Một user liên kết được nhiều nhà cung cấp'
+}
+
+Table sessions [headercolor: #27AE60] {
+  id uuid [pk]
+  user_id uuid [not null]
+  family_id uuid [not null, note: 'Chuỗi refresh token của một lần đăng nhập']
+  token_hash text [not null, unique, note: 'sha256 của refresh token']
+  replaced_by_id uuid [note: 'Token mới thay thế khi refresh']
+  user_agent text [note: 'Trang "thiết bị đang đăng nhập"']
+  ip text
+  expires_at timestamp [not null]
+  revoked_at timestamp
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    user_id
+    family_id
+    expires_at [note: 'Job dọn session hết hạn']
+  }
+  Note: '''
+  Refresh token xoay vòng. Mỗi lần refresh: token cũ revoked + replaced_by_id, token mới cùng family_id.
+  Token đã revoked bị dùng lại => bị đánh cắp => thu hồi cả family.
+  '''
+}
+
+Table verification_tokens [headercolor: #27AE60] {
+  id uuid [pk]
+  user_id uuid [not null]
+  type "VerificationTokenType" [not null]
+  token_hash text [not null, unique]
+  expires_at timestamp [not null]
+  used_at timestamp [note: 'Dùng một lần']
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    (user_id, type)
+  }
+  Note: 'Link xác minh email và đặt lại mật khẩu gửi qua email (6.1)'
+}
+
+// ───────────────────────── Quyền ─────────────────────────
+
+Table board_members [headercolor: #E67E22] {
+  board_id uuid [not null]
+  user_id uuid [not null]
+  role "BoardRole" [not null]
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    (board_id, user_id) [pk, note: 'Mỗi người một vai trò trên một bảng']
+    user_id [note: 'Trang "bảng của tôi"']
+  }
+  Note: 'Ai có vai trò gì trên bảng nào (6.3, 8.1). Tra một lần lúc JoinBoard rồi lưu vào socket'
+}
+
+Table share_links [headercolor: #E67E22] {
+  id uuid [pk]
+  board_id uuid [not null]
+  token text [not null, unique, note: 'Lưu bản gốc (không băm) để chủ bảng copy lại link; an toàn nhờ revoked_at + expires_at']
+  role "BoardRole" [not null]
+  created_by uuid [not null]
+  expires_at timestamp
+  revoked_at timestamp [note: 'Thu hồi => ngắt socket của người vào bằng link (8.2)']
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    board_id
+  }
+  Note: 'Link chia sẻ kèm vai trò (6.4)'
+}
+
+Table board_invitations [headercolor: #E67E22] {
+  id uuid [pk]
+  board_id uuid [not null]
+  email text [not null, note: 'Người nhận có thể chưa có tài khoản']
+  role "BoardRole" [not null]
+  token_hash text [not null, unique]
+  invited_by_id uuid [not null]
+  expires_at timestamp [not null]
+  accepted_at timestamp [note: 'Chấp nhận xong mới tạo board_members']
+  revoked_at timestamp
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    board_id
+    email
+  }
+  Note: 'Mời người vào bảng qua email (6.3)'
+}
+
+// ───────────────────────── Lịch sử & cộng tác ─────────────────────────
+
+Table snapshots [headercolor: #9B59B6] {
+  id uuid [pk]
+  board_id uuid [not null]
+  seq integer [not null, note: 'last_seq lúc chụp']
+  data jsonb [not null, note: 'Toàn bộ element tại thời điểm đó']
+  label text [note: 'Ví dụ "Trước khi khôi phục"']
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    (board_id, seq) [unique, note: 'Job chạy trùng trên 2 server cũng không chụp 2 lần']
+  }
+  Note: 'Phiên bản cũ: chụp định kỳ (6.6), xem và khôi phục (6.5)'
+}
+
+Table comments [headercolor: #9B59B6] {
+  id uuid [pk]
+  board_id uuid [not null]
+  parent_id uuid [note: 'Trả lời = comment có parent']
+  element_id text [note: 'Gắn vào element; không FK vì element có thể bị xóa mềm']
+  x "double precision" [note: 'Hoặc gắn vào tọa độ bảng']
+  y "double precision"
+  author_id uuid [not null]
+  body text [not null]
+  resolved_at timestamp [note: 'Đánh dấu đã xử lý']
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    board_id
+  }
+  Note: 'Bình luận theo luồng trên bảng (5.1)'
+}
+
+Table notifications [headercolor: #9B59B6] {
+  id uuid [pk]
+  user_id uuid [not null, note: 'Người nhận']
+  type "NotificationType" [not null]
+  actor_id uuid [note: 'Ai gây ra; null = hệ thống']
+  board_id uuid
+  comment_id uuid
+  data jsonb [not null, default: '{}', note: 'Chụp tên bảng, đoạn trích lúc tạo: hiển thị không cần join']
+  read_at timestamp
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    (user_id, read_at) [note: 'Thông báo chưa đọc']
+    (user_id, created_at)
+  }
+  Note: 'Thông báo: @mention (5.2), trả lời, lời mời, đổi vai trò'
+}
+
+Table templates [headercolor: #9B59B6] {
+  id uuid [pk]
+  name text [not null]
+  description text
+  data jsonb [not null, note: '{ formatVersion, elements } giống file export (7.2)']
+  is_public boolean [not null, default: false]
+  created_by_id uuid [note: 'null = template có sẵn của hệ thống']
+  created_at timestamp [not null, default: `now()`]
+  updated_at timestamp [not null]
+
+  indexes {
+    created_by_id
+  }
+  Note: 'Tạo bảng từ mẫu (5.9): copy element với id mới'
+}
+
+// ───────────────────────── Vận hành ─────────────────────────
+
+Table audit_logs [headercolor: #7F8C8D] {
+  id uuid [pk]
+  actor_id text [note: 'userId, clientId của khách, hoặc null = hệ thống']
+  board_id uuid
+  action text [not null, note: 'board.delete, member.role_change, share_link.revoke, snapshot.restore, auth.login...']
+  metadata jsonb [not null, default: '{}']
+  ip text
+  created_at timestamp [not null, default: `now()`]
+
+  indexes {
+    (board_id, created_at)
+    (actor_id, created_at)
+  }
+  Note: 'Ai làm gì lúc nào. Cố ý KHÔNG có khóa ngoại: log phải còn sau khi user / bảng bị xóa hẳn'
+}
+
+// ───────────────────────── Quan hệ ─────────────────────────
+
+Ref: boards.owner_id > users.id [delete: set null]
+
+Ref: elements.board_id > boards.id [delete: cascade]
+Ref: operations.board_id > boards.id [delete: cascade]
+Ref: assets.board_id > boards.id [delete: cascade]
+Ref: snapshots.board_id > boards.id [delete: cascade]
+Ref: comments.board_id > boards.id [delete: cascade]
+Ref: board_members.board_id > boards.id [delete: cascade]
+Ref: share_links.board_id > boards.id [delete: cascade]
+Ref: board_invitations.board_id > boards.id [delete: cascade]
+Ref: notifications.board_id > boards.id [delete: cascade]
+
+Ref: oauth_accounts.user_id > users.id [delete: cascade]
+Ref: sessions.user_id > users.id [delete: cascade]
+Ref: verification_tokens.user_id > users.id [delete: cascade]
+Ref: board_members.user_id > users.id [delete: cascade]
+Ref: share_links.created_by > users.id [delete: cascade]
+Ref: board_invitations.invited_by_id > users.id [delete: cascade]
+Ref: comments.author_id > users.id [delete: cascade]
+Ref: notifications.user_id > users.id [delete: cascade]
+Ref: notifications.actor_id > users.id [delete: set null]
+Ref: templates.created_by_id > users.id [delete: set null]
+
+Ref: comments.parent_id > comments.id [delete: cascade]
+Ref: notifications.comment_id > comments.id [delete: cascade]
+
+// ───────────────────────── Nhóm hiển thị ─────────────────────────
+
+TableGroup core_drawing [color: #3498DB] {
+  boards
+  elements
+  operations
+  assets
+}
+
+TableGroup accounts [color: #27AE60] {
+  users
+  oauth_accounts
+  sessions
+  verification_tokens
+}
+
+TableGroup access [color: #E67E22] {
+  board_members
+  share_links
+  board_invitations
+}
+
+TableGroup history_collab [color: #9B59B6] {
+  snapshots
+  comments
+  notifications
+  templates
+}
+
+TableGroup ops [color: #7F8C8D] {
+  audit_logs
+}

@@ -7,6 +7,9 @@ import { SocketEmitterModule } from './infra/socket/socket-emitter.module.js';
 import { BoardModule } from './modules/board/board.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
+import { MailModule } from './infra/mail/mail.module.js';
+import { UserModule } from './modules/user/user.module.js';
+import { AuthModule } from './modules/auth/auth.module.js';
 
 @Module({
   imports: [
@@ -17,6 +20,9 @@ import { RealtimeModule } from './modules/realtime/realtime.module.js';
     HealthModule,
     BoardModule,
     RealtimeModule,
+    MailModule,
+    UserModule,
+    AuthModule
   ],
 })
 export class AppModule {}

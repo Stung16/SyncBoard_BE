@@ -1,0 +1,8 @@
+import { Global, Module } from '@nestjs/common';
+import { MailService } from './mail.service.js';
+@Global()
+@Module({
+  controllers: [],
+  providers: [MailService]
+})
+export class MailModule {}

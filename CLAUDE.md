@@ -19,12 +19,13 @@ npx prisma migrate dev --name <x> && npx prisma generate   # Prisma 7: migrate d
 npx prisma db seed                   # demo board 0192f000-0000-7000-8000-000000000001
 ```
 
-ESM: relative imports need the `.js` suffix. Global pipe/adapter/shutdown hooks live in `src/app.setup.ts` (`setupApp`, async — it connects the adapter's Redis clients) so `main.ts` and e2e tests share them; e2e must `await setupApp(app)` and `app.listen(0)` for the gateway to accept connections. `multer` is forced to 2.5.0 via `overrides` (platform-express 12.2.0 pins a vulnerable 2.4.0) — don't run `npm audit fix --force`, it downgrades Nest to 11.
+ESM: relative imports need the `.js` suffix. All app-wide setup lives in `src/app.setup.ts` (`setupApp`, async — it connects the adapter's Redis clients): helmet, REST CORS with credentials, cookie-parser, request-log middleware, global prefix `/api` (except `/health`), Zod pipe, `PrismaExceptionFilter` (P2002→409, P2025→404, P2003→400; HTTP only), Socket.IO adapter, Swagger at `/api/docs` (not in production), shutdown hooks so `main.ts` and e2e tests share them; e2e must `await setupApp(app)` and `app.listen(0)` for the gateway to accept connections. `multer` is forced to 2.5.0 via `overrides` (platform-express 12.2.0 pins a vulnerable 2.4.0) — don't run `npm audit fix --force`, it downgrades Nest to 11.
 
 - `SyncBoard — Phân tích thiết kế.md` — the design spec (data model, event protocol, use cases per feature level 1–8, concurrency, permissions). Source of truth for behavior.
 - `docs/research/nestjs-folder-structure.md` — researched folder structure with cited sources; the tree in section 4 is the one to follow.
 - `docs/research/setup-guide.md` — verified scaffolding steps, pinned versions, commands (incl. running a single test).
 - `docs/research/implementation-guide.md` — per-module logic, library APIs, pitfalls, build order with "xong khi" checks.
+- `docs/db/syncboard.dbml` — hand-copied DBML of the schema with per-table feature notes (for dbdiagram.io). `prisma/schema.prisma` is the source of truth; update the DBML when the schema changes.
 
 The user codes the project themselves from these guides: explain and review rather than writing whole modules unless asked.
 
@@ -54,5 +55,5 @@ NestJS 12 (ESM, scaffolded by `nest new`: Vitest + oxlint + Prettier, npm, Node 
 - `modules/board/domain/` holds pure TypeScript (LWW apply, z-index, permission matrix) with no NestJS/Prisma imports — that's where the hard logic and its unit tests live.
 - Gateway lives in `modules/realtime/` and only receives/returns messages, delegating to services.
 - Dependencies flow one way: gateway/controller → service → `infra/`. No module imports the gateway; anything that must emit or disconnect sockets uses `SocketEmitter` (`infra/socket`, a leaf module bound by the gateway in `afterInit`). `forwardRef` means the rule was broken.
-- No repository layer, use cases, or interfaces unless there are already ≥ 2 implementations (currently only storage). DTOs live in each feature's `dto/`. Promote code to `common/` only once ≥ 2 modules use it.
+- Module layout (user's choice, applied to `auth/` and `user/`; new modules follow it): `<name>.module.ts` + `controllers/`, `services/`, `repositories/`, `dto/`. Repositories hold **only** Prisma queries (no business rules, no HttpException); services hold logic and never call `PrismaService` directly; other modules use a module's exported service, never its repository. Pure logic with no I/O still goes in `domain/` (e.g. `board/domain/`). No use-case classes; interfaces only where ≥ 2 implementations exist (currently storage). Promote code to `common/` only once ≥ 2 modules use it.
 - All providers stay singleton (no `Scope.REQUEST`). Unit specs sit next to the file; e2e specs in `test/`.
