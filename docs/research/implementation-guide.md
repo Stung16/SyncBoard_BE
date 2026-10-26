@@ -18,7 +18,7 @@ Phiên bản lấy từ npm registry ngày 2026-10-24 [S68]:
 | `socket.io` / `socket.io-client` | 4.8.4 | |
 | `@prisma/client` | 7.10.1 | |
 | `prisma` (CLI) | **8.0.0-rc.27** | `latest` đang trỏ tới bản RC |
-| `class-validator` / `class-transformer` | 0.15.1 / 0.5.1 | |
+| `zod` | 4.6.7 | Mọi validate (env, REST, Socket.IO) qua `StandardSchemaValidationPipe` có sẵn của Nest 12 [S12][S48]. Không dùng `class-validator` / `class-transformer` |
 | `fractional-indexing` | 4.0.0 | chỉ có ESM, license CC0 |
 | `@nestjs/schedule` | 12.0.2 | |
 | `@nestjs/passport` / `@nestjs/jwt` / `passport-jwt` | 12.0.0 / 12.0.3 / 4.0.1 | |
@@ -58,7 +58,7 @@ function applyOp(current: ElementState | undefined, op: Op, ctx: { actor: string
 
 **Logic từng bước:**
 
-1. `switch (op.type)`. Gặp type không biết thì trả `{ ok: false, reason: 'unknown_op' }`. DTO đã lọc rồi, nhưng domain không được giả định điều đó.
+1. `switch (op.type)`. Gặp type không biết thì trả `{ ok: false, reason: 'unknown_op' }`. Schema đã lọc rồi, nhưng domain không được giả định điều đó.
 2. **`add`:**
    1. `current` đã tồn tại (kể cả đã xóa mềm) thì từ chối `already_exists`. Id do client sinh nên trùng là lỗi của client.
    2. `op.element.type` phải nằm trong allowlist `ELEMENT_TYPES` (UC 2.1).
@@ -91,8 +91,8 @@ function applyOp(current: ElementState | undefined, op: Op, ctx: { actor: string
    - `clear` phải là op **duy nhất** trong lô của nó, nếu không thì từ chối cả lô.
    - `clear` bỏ qua element đang `locked`, cho nhất quán với luật 2.12 (đã chốt).
    - Payload của op `clear` lưu danh sách id vừa bị xóa (`deletedIds`). Undo là `restore { clearSeq }`: service đọc `deletedIds` từ dòng `operations` có seq đó, rồi `updateMany` các id vẫn còn `isDeleted = true` về `false` và tăng version (đã chốt, xem UC 1.7 của spec). Không nhận danh sách id từ client: 50.000 id vượt `maxHttpBufferSize`.
-8. **`validateData(type, data)` / `validatePatchValue(type, key, value)`:** một bảng mô tả cho từng type, dùng chung cho `add`, `update` và import (7.2):
-   - Số phải là `typeof v === 'number' && Number.isFinite(v)`.
+8. **`validateData(type, data)` / `validatePatch(type, dataPatch)`:** một bảng mô tả cho từng type, dùng chung cho `add`, `update` và import (7.2). Bảng đó chính là `elementDataSchemas` trong `board/dto/element.dto.ts` (mục 2.2): mỗi type một `z.strictObject`. `validateData` là `elementDataSchemas[type].safeParse(data)`. `validatePatch` là `elementDataSchemas[type].partial().safeParse(dataPatch)`: đã thử, `.partial()` giữ nguyên tính strict (khóa lạ vẫn ra `Unrecognized key`), còn patch rỗng `{}` thì qua, nên domain tự kiểm tra `empty_patch`. Domain import Zod là được, vì quy tắc chỉ cấm NestJS và Prisma. Nội dung bảng:
+   - Số dùng `z.number()`. Zod 4 tự từ chối `NaN` và `±Infinity` [S46].
    - `opacity` nằm trong [0, 1]. Màu khớp regex hex.
    - `points` là mảng các cặp số hữu hạn, tối đa 5.000 điểm.
    - `text` tối đa 10.000 ký tự. `strokeStyle ∈ {solid, dashed}`.
@@ -122,12 +122,16 @@ function applyOp(current: ElementState | undefined, op: Op, ctx: { actor: string
    - Nếu sau đó bạn `Object.assign({}, patch)`, prototype của object đích **bị đổi** (chạy thử: `a.polluted === 1`), vì `Object.assign` dùng `[[Set]]` trên đích [S60].
    - Một hàm deep-merge tự viết kiểu `for (k in src) merge(t[k], src[k])` làm ô nhiễm **toàn cục**: sau đó `({}).polluted === 1` (chạy thử). Spread `{...patch}` thì giữ `__proto__` thành own property, không ô nhiễm, nhưng khóa đó vẫn bị lưu vào DB rồi phát cho mọi client.
    - **Cách tránh:** dùng allowlist khóa theo type. Khóa nào không có trong danh sách thì từ chối. OWASP khuyên thêm `Object.create(null)` hoặc `Map` cho dictionary [S59].
-   - `class-transformer@0.5.1` tự bỏ qua khóa `__proto__` và `constructor` khi chuyển plain sang instance (đọc source [S48], chạy thử). Khóa `prototype` thì vẫn giữ. Payload có khóa `constructor` trỏ tới object còn làm `plainToInstance` ném `TypeError` (chạy thử), và client chỉ nhận "Internal server error".
-   - Đừng dựa vào DTO. Domain còn được gọi từ đường import (7.2), nơi có thể không có DTO.
+   - `StandardSchemaValidationPipe` của Nest xóa đệ quy `__proto__`, `prototype`, `constructor` khỏi payload **trước** khi validate (`stripProtoKeys` [S48]). Đã chạy thử qua REST và socket: patch `{ x: 1, __proto__: {...}, constructor: {...}, prototype: 2 }` tới handler chỉ còn `{ x: 1 }`, prototype vẫn là `Object.prototype`.
+   - Zod 4.6.7 tự xử lý thế nào khi **không** có pipe (chạy thử với `JSON.parse` của payload trên):
+     - `z.object()`: bỏ cả ba khóa (bỏ mọi khóa lạ).
+     - `z.strictObject()`: từ chối với `Unrecognized keys: "__proto__", "constructor", "prototype"`.
+     - `z.record()` và `z.looseObject()`: **chỉ** bỏ `__proto__` [S47]. `constructor` và `prototype` vẫn còn là own property trong output.
+   - Vì vậy đừng dựa vào pipe hay `z.record`. Domain còn được gọi từ đường import (7.2), nơi không có pipe. Allowlist theo type (`z.strictObject` ở bước 8) mới là chốt chặn.
 2. **`NaN` / `Infinity`.**
    - Qua Socket.IO, JSON biến `NaN` và `Infinity` thành `null` (chạy thử: `JSON.stringify({a:NaN})` ra `{"a":null}`). Vì vậy server thường thấy `null` ở chỗ cần số.
    - Với parser nhị phân, hoặc khi gọi domain từ code server, `NaN` lọt qua thật.
-   - `isNumber` của class-validator mặc định từ chối `NaN` và `±Infinity`, trừ khi bật `allowNaN` / `allowInfinity` [S47]. Nhưng nó chỉ chạy trên field có decorator, còn `data` / `patch` là object tự do. Phải check `Number.isFinite` trong domain.
+   - `z.number()` của Zod 4 từ chối `NaN`, `Infinity`, `-Infinity` (chạy thử). `.finite()` giờ không làm gì [S45][S46]. Nhưng schema của `update` chỉ khai báo `patch` là `z.record(z.string(), z.unknown())`, vì lúc validate chưa biết type của element. Giá trị bên trong patch chỉ được kiểm tra khi domain chạy `validatePatch` (bước 8).
 3. **Deep merge hay shallow merge.**
    - Merge sâu sai với dữ liệu bảng vẽ. Mảng `points` sẽ bị merge theo index, nét vẽ thành hỗn hợp của hai nét. `startBinding` sẽ trộn hai `elementId`.
    - Merge nông ở cấp một khớp đúng ý "LWW theo từng trường" (7.2). Đây cũng là cách Figma làm: last-writer-wins theo từng property, server quyết định thứ tự [S50].
@@ -200,7 +204,7 @@ function applyOp(current: ElementState | undefined, op: Op, ctx: { actor: string
 
 ## 2. `BoardLocks` + `BoardService.submitOps` (GĐ1, log op ở GĐ3)
 
-File: `board/board-locks.ts` (+ spec), `board/board.service.ts` (+ spec), `board/dto/op.dto.ts`, `board/dto/submit-ops.dto.ts`. Từ GĐ3 thêm `board/operation.service.ts`.
+File: `board/board-locks.ts` (+ spec), `board/board.service.ts` (+ spec), `board/dto/element.dto.ts`, `board/dto/op.dto.ts` (+ spec). Từ GĐ3 thêm `board/operation.service.ts`.
 
 ### 2.1 `BoardLocks`
 
@@ -217,36 +221,45 @@ Code mẫu ở 7.1 của tài liệu thiết kế đã đúng. Tự gõ lại v�
 - Xong hết thì `size() === 0`.
 - 1.000 việc nối đuôi trên một bảng chạy đúng thứ tự.
 
-### 2.2 DTO cho `SubmitOps`
+### 2.2 Schema Zod cho `SubmitOps`
 
-**Thư viện:** `class-validator` + `class-transformer`, dùng discriminator.
+**Thư viện:** `zod` 4 + `StandardSchemaValidationPipe` (global, setup-guide bước 8). Handler viết `@MessageBody({ schema: submitOpsSchema }) dto: SubmitOpsDto` [S3][S12]. Kiểu lấy từ `z.infer`, không viết DTO class song song.
 
-- Bọc mảng trong một class: `class SubmitOpsDto { ops: OpDto[] }`. Lý do: "TypeScript does not emit metadata for generic types such as arrays" [S12], nên `@MessageBody() ops: OpDto[]` không được validate.
-- `@ValidateNested({ each: true })` chỉ chạy khi phần tử là instance của class [S45]. Vì vậy cần `@Type` với discriminator [S46]:
+**Đặt ở đâu:** `board/dto/element.dto.ts` (schema `data` theo type, schema element) và `board/dto/op.dto.ts` (op, lô). Giữ đúng cây thư mục và tên `*.dto.ts` như ví dụ trong docs [S12]. Hai file này **chỉ import `zod`**, không import NestJS, để `domain/` dùng lại được (1.1 bước 8) và sau này frontend chép sang (hoặc chuyển vào package dùng chung) giống `realtime/events.ts` (3.8). Chưa cần thư mục `contracts/` riêng khi chưa có package thứ hai.
 
 ```ts
-class SubmitOpsDto {
-  @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true })
-  @Type(() => BaseOpDto, {
-    discriminator: { property: 'type', subTypes: [
-      { value: AddOpDto, name: 'add' }, { value: UpdateOpDto, name: 'update' }, /* delete, restore, reorder, clear */
-    ] },
-    keepDiscriminatorProperty: true,   // mặc định thuộc tính discriminator bị xóa khi transform [S46]
-  })
-  ops!: BaseOpDto[];
-}
+// board/dto/op.dto.ts
+const opId = z.uuid();
+const elementId = z.string().min(1).max(64);
+
+export const opSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('add'), opId, element: elementSchema }),   // elementSchema: discriminatedUnion theo element.type
+  z.strictObject({ type: z.literal('update'), opId, elementId, baseVersion: z.int().min(0),
+                   patch: z.record(z.string().max(64), z.unknown()) }),       // bên trong patch: domain kiểm tra (1.1)
+  z.strictObject({ type: z.literal('delete'), opId, elementId }),
+  z.strictObject({ type: z.literal('restore'), opId, elementId: elementId.optional(), clearSeq: z.int().min(1).optional() })
+    .refine((o) => (o.elementId === undefined) !== (o.clearSeq === undefined), { error: 'restore needs exactly one of elementId, clearSeq' }),
+  z.strictObject({ type: z.literal('reorder'), opId, elementId, position: z.enum(['front', 'back', 'forward', 'backward']) }),
+  z.strictObject({ type: z.literal('clear'), opId }),
+]);
+export type OpDto = z.infer<typeof opSchema>;
+
+export const submitOpsSchema = z.strictObject({ ops: z.array(opSchema).min(1).max(100) })
+  .refine((b) => b.ops.length === 1 || !b.ops.some((o) => o.type === 'clear'), { error: 'clear must be the only op in its batch', path: ['ops'] });
+export type SubmitOpsDto = z.infer<typeof submitOpsSchema>;
 ```
 
-Mỗi subtype khai báo đủ decorator:
+`elementSchema` trong `element.dto.ts` làm giống hệt: `z.discriminatedUnion('type', [...])`, mỗi type một `z.strictObject({ id, type: z.literal('rect'), groupId, frameId, data: elementDataSchemas.rect })`. Type nào không có trong danh sách thì bị từ chối, nên đó chính là allowlist `ELEMENT_TYPES` (UC 2.1).
 
-- `@IsUUID() opId`, `@IsString() @MaxLength(64) elementId`.
-- `@IsInt() @Min(0) baseVersion`, `@IsObject() patch`.
-- `@IsIn([...]) position` cho reorder.
+Ghi chú hành vi (chạy thử với Zod 4.6.7 qua `StandardSchemaValidationPipe`, cả REST lẫn socket):
 
-Ghi chú hai hành vi (chạy thử với class-validator 0.15.1 / class-transformer 0.5.1):
-
-- `type: "bogus"` rơi về class `BaseOpDto`, không có metadata. Op đó bị từ chối **chỉ vì** `forbidUnknownValues` mặc định là `true` [S45]. Đừng tắt option này.
-- `whitelist: true, forbidNonWhitelisted: true` từ chối khóa lạ ở cấp op, nhưng **không** nhìn vào bên trong `patch` (một object tự do). Bên trong `patch` là việc của domain.
+- `type: "bogus"` ra `ops.0.type: Invalid discriminator value. Expected 'add' | 'update' | 'delete' | 'restore' | 'reorder' | 'clear'`.
+- 101 op ra `ops: Too big: expected array to have <=100 items`. Nét 5.001 điểm ra `ops.0.element.data.points: Too big: expected array to have <=5000 items`. `clear` đi kèm op khác ra `ops: clear must be the only op in its batch`. `restore` không có cả `elementId` lẫn `clearSeq` thì bị từ chối, `restore { clearSeq: 3 }` thì qua.
+- `z.strictObject` từ chối khóa lạ ở cấp op và cấp element, nhưng **không** nhìn vào bên trong `patch` (`z.record`). Bên trong `patch` là việc của domain.
+- **Đừng lồng `z.union()` vào `z.discriminatedUnion()`** (ví dụ hai object `restore` riêng). Đã thử: TypeScript báo lỗi kiểu, và nếu ép qua thì lần `parse` đầu tiên ném `Invalid discriminated union option at index "3"`. Lỗi đó là exception thường, client nhận "Internal server error". Dùng `.refine()` như trên.
+- Vẫn bọc mảng trong `{ ops }`. Zod validate được mảng trần [S12], nhưng object để sau này thêm field mà không đổi giao thức.
+- Không cần `@nestjs/swagger` ở đây. Nếu sau này có REST docs, Nest tự chuyển schema Zod ≥ 4.2 sang OpenAPI [S12].
+- **Tốc độ:** Zod tự công bố Zod 4 nhanh hơn Zod 3 khoảng 14 lần với string, 7 lần với mảng, 6,5 lần với object [S70]. Đó là benchmark của chính vendor và chỉ so với Zod 3. Không tìm thấy nguồn chính thức nào so Zod 4 với class-validator, nên đừng lấy tốc độ làm lý do chọn Zod. Nếu cần số liệu thì tự đo lô 100 op trên máy mình.
 
 ### 2.3 `BoardService.submitOps`
 
@@ -342,7 +355,9 @@ await this.prisma.$transaction(async (tx) => {
    - Nét vẽ 5.000 điểm dạng `[123.45,678.9]` nặng khoảng 75 KB. Spec đề xuất hạ `maxHttpBufferSize` xuống 100 KB. Vượt ngưỡng thì Socket.IO **đóng socket**, không chỉ từ chối tin: "maximum size … of a single message before the socket is closed" [S21].
    - Client tự kết nối lại, gửi lại đúng lô đó, rồi lại bị đóng. Thành vòng lặp.
    - Client phải chia lô theo **byte** (chạy `JSON.stringify` thử trước khi gửi) và làm tròn tọa độ. Chọn ngưỡng server đủ cho một nét tối đa cộng phần đệm.
-9. **`opId` không phải UUID.** Cột `op_id` là `@db.Uuid`, nên chuỗi sai định dạng làm Postgres ném lỗi, client thấy lỗi 500 chung chung. Dùng `@IsUUID()` trong DTO. Áp dụng tương tự cho `boardId` ở `JoinBoard`.
+9. **`opId` không phải UUID.** Cột `op_id` là `@db.Uuid`, nên chuỗi sai định dạng làm Postgres ném lỗi, client thấy lỗi 500 chung chung. Dùng `z.uuid()` trong schema. Áp dụng tương tự cho `boardId` ở `JoinBoard`.
+   - `z.uuid()` của Zod 4 chặt hơn bản 3: kiểm tra cả bit variant theo RFC 9562 [S45]. Đã thử: `crypto.randomUUID()` (v4), UUID dạng v7 (như `uuid(7)` của Prisma) và UUID toàn số 0 đều qua. Chuỗi đúng dạng 8-4-4-4-12 nhưng sai bit variant thì bị từ chối. `z.guid()` là bản lỏng.
+   - Đừng dùng `z.string().uuid()`: cách viết cũ của Zod 3, đã deprecated [S45].
 
 ---
 
@@ -406,13 +421,13 @@ afterInit(server: Server<C2S, S2C, {}, SocketData>) {
 
 ### 3.4 `JoinBoard`
 
-**DTO:**
+**Schema** (`realtime/dto/join-board.dto.ts`, mẫu đầy đủ ở setup-guide bước 8), một `z.strictObject` gồm:
 
-- `@IsUUID() boardId`.
-- `@IsString() @MaxLength(50) displayName`.
-- `@IsOptional() @IsInt() @Min(0) lastSeq`.
-- `@IsOptional() @IsString() shareToken`.
-- `@IsUUID() clientId`: id cố định trên localStorage (UC 1.4).
+- `boardId: z.uuid()`.
+- `displayName: z.string().trim().min(1).max(50)`.
+- `lastSeq: z.int().min(0).optional()`.
+- `shareToken: z.string().max(100).optional()`.
+- `clientId: z.uuid()`: id cố định trên localStorage (UC 1.4).
 
 **Logic từng bước:**
 
@@ -532,9 +547,9 @@ class TokenBucket {
   - Khi handler ném lỗi, filter WS mặc định emit sự kiện `exception` với `{ status, message, cause }`, không gọi ack [S2][S18]. Client dùng `emitWithAck` sẽ chờ tới hết timeout.
   - `cause` mặc định **gửi lại nguyên payload** của client [S2][S18]. Một lô 100 op sẽ bị dội về. Đặt `includeCause: false` (10.1).
   - Với `SubmitOps`, hãy `try/catch` trong handler và trả `{ ok: false, reason }`.
-- **ValidationPipe toàn cục không hợp với gateway.** Pipe global (`useGlobalPipes`) **có** áp cho gateway, nhưng `BadRequestException` của nó tới client thành "Internal server error" [S3]. Pipe global chạy **trước** pipe gắn ở gateway hay tham số. Vì vậy thêm `exceptionFactory` ở gateway mà vẫn giữ pipe global thì không cứu được: setup-guide đã chạy thử và thấy client vẫn nhận "Internal server error". Có hai cách đúng:
-  - **Cách dùng trong dự án này:** giữ pipe global và gắn `@UseFilters(WsExceptionFilter)` lên gateway. Filter đổi `BadRequestException` thành `WsException`. Xem `setup-guide.md` bước 7.3.
-  - **Cách khác:** bỏ pipe global, gắn pipe riêng cho REST, và gắn cho gateway `new ValidationPipe({ ..., exceptionFactory: (errors) => new WsException(errors) })` ở `@MessageBody(...)`. Pipe ở cấp method hay gateway chạy trên **mọi** tham số của handler [S3].
+- **Pipe validate toàn cục ném lỗi HTTP, không phải lỗi WS.** `StandardSchemaValidationPipe` global (`useGlobalPipes`) **có** áp cho gateway, nhưng mặc định nó ném `BadRequestException`, và lỗi đó tới client thành "Internal server error" [S3]. Pipe global chạy **trước** pipe gắn ở gateway hay tham số. Vì vậy thêm `exceptionFactory` ở gateway mà vẫn giữ pipe global thì không cứu được: setup-guide đã chạy thử (với `ValidationPipe`, cùng cơ chế) và thấy client vẫn nhận "Internal server error". Có hai cách đúng:
+  - **Cách dùng trong dự án này:** giữ pipe global và gắn `@UseFilters(WsExceptionFilter)` lên gateway. Filter đổi `BadRequestException` thành `WsException`. Xem `setup-guide.md` bước 7.3. Đã chạy thử với `SubmitOps` sai: client nhận sự kiện `exception` có `{ message: ["ops.0.baseVersion: Too small: expected number to be >=0", "ops.1.type: Invalid discriminator value. …"], error: "Bad Request", statusCode: 400 }`. Thông báo có đường dẫn tới op sai, không chứa giá trị client gửi, và không có `cause`.
+  - **Cách khác:** bỏ pipe global, gắn pipe riêng cho REST, và gắn cho gateway `@UsePipes(new StandardSchemaValidationPipe({ exceptionFactory: (issues) => new WsException(issues) }))` như docs [S3]. Pipe này chỉ validate tham số có `schema`, nên gắn ở cấp gateway cũng không đụng tới `@ConnectedSocket()` [S12].
 
 - **Gõ sai tên sự kiện.** `'OpsAplied'` chạy im lặng và không ai nhận. Khai báo `ServerToClientEvents` / `ClientToServerEvents` trong `events.ts`. Dùng chúng làm generic cho `Server` / `Socket` [S25], và dùng hằng `ClientEvents.SubmitOps` trong `@SubscribeMessage(...)`. Copy cùng file đó sang frontend.
 
@@ -683,7 +698,7 @@ Thêm `algorithms: ['HS256']`, và `issuer` / `audience` nếu dùng. Đây là 
 
 **Đăng ký / đăng nhập, từng bước:**
 
-1. Validate DTO: email, mật khẩu ≥ 8 ký tự và **≤ 72 byte nếu dùng bcrypt** (OWASP [S57]), `displayName ≤ 50`.
+1. Validate bằng schema Zod (`@Body({ schema })`): `z.email()`, mật khẩu ≥ 8 ký tự và **≤ 72 byte nếu dùng bcrypt** (OWASP [S57]), `displayName ≤ 50`.
 2. Băm mật khẩu bằng `argon2.hash(password)`. Gói `argon2@0.45.1` mặc định dùng argon2id với `timeCost = 3`, `memoryCost = 65536` (64 MiB), `parallelism = 4` [S66]. Mức này vượt mức tối thiểu OWASP (m = 19 MiB, t = 2, p = 1) [S57].
 3. Lưu user. Email trùng gây `P2002`: trả 409 (10.1).
 4. Đăng nhập:
@@ -896,10 +911,10 @@ File: `modules/comment/{comment.module, comment.controller, comment.service, dto
 | Giới hạn | Cơ chế |
 |---|---|
 | Kích thước tin, ví dụ 100 KB | `@WebSocketGateway({ maxHttpBufferSize: 100_000 })` [S18][S21]. Vượt thì **socket bị đóng** [S21], xem bẫy 8 ở 2.3 |
-| ≤ 100 op mỗi lô | `@ArrayMaxSize(100)` trong `SubmitOpsDto` |
-| Type element trong allowlist | `@IsIn(ELEMENT_TYPES)` + `validateData` trong domain |
-| ≤ 5.000 điểm, chữ ≤ 10.000, tên ≤ 50 | `validateData` / `validatePatchValue` (1.1). `@MaxLength(50)` cho `displayName` |
-| Số hữu hạn | `Number.isFinite` trong domain. `@IsNumber()` cho field có kiểu cố định (mặc định chặn NaN và Infinity [S47]) |
+| ≤ 100 op mỗi lô | `z.array(opSchema).max(100)` trong `submitOpsSchema` (2.2) |
+| Type element trong allowlist | `z.discriminatedUnion('type', …)` của `elementSchema` (2.2) + `validateData` trong domain |
+| ≤ 5.000 điểm, chữ ≤ 10.000, tên ≤ 50 | `.max(5000)` / `.max(10_000)` trong `elementDataSchemas`, dùng cả ở schema op lẫn `validateData` / `validatePatch` (1.1). `z.string().max(50)` cho `displayName` |
+| Số hữu hạn | `z.number()` (Zod 4 mặc định chặn NaN và Infinity [S46]), cả trong schema lẫn `validatePatch` của domain |
 | 30 `SubmitOps`/s, 30 cursor/s | Token bucket trong `socket.use` (3.7) |
 | Upload 10 MB, chỉ ảnh | `limits.fileSize` + `FileTypeValidator` có magic number (5.1) |
 | ≤ 50.000 element mỗi bảng | Kiểm tra số lượng trong `submitOps` khi có `add` (2.3 bước 5) và khi import (7.2) |
@@ -913,6 +928,7 @@ Theo cột "Cần từ giai đoạn" ở mục 4.1 của spec. Chưa qua bài "x
 **GĐ1: MVP vẽ chung một bảng**
 
 - [ ] `domain/permissions.ts` + spec. *Xong khi:* test 4 × 8 ô xanh.
+- [ ] `board/dto/element.dto.ts` + `op.dto.ts` (Zod) + spec gọi thẳng `safeParse`. *Xong khi:* mỗi loại op hợp lệ đều qua; khóa lạ, `type` lạ, 101 op, 5.001 điểm, `clear` kèm op khác, `restore` thiếu hoặc thừa trường, `NaN`/`Infinity` đều bị từ chối.
 - [ ] `domain/apply-op.ts` với `add` / `update` / `delete` / `clear` + spec (merge nông, NaN, `__proto__`, deleted). *Xong khi:* mọi case ở 1.1 xanh và không case nào mutate input.
 - [ ] `board-locks.ts` + spec. *Xong khi:* 5 test ở 2.1 xanh, `size() === 0`.
 - [ ] `BoardController` `POST /api/boards`, `BoardService.submitOps` (elements + `last_seq`, chưa có bảng `operations`). *Xong khi:* 20 lô song song cho `seq` liên tục và version đúng.
@@ -958,7 +974,7 @@ Theo cột "Cần từ giai đoạn" ở mục 4.1 của spec. Chưa qua bài "x
 - [S9] Lifecycle events: https://docs.nestjs.com/fundamentals/lifecycle-events
 - [S10] Execution context: https://docs.nestjs.com/fundamentals/execution-context
 - [S11] Exception filters: https://docs.nestjs.com/exception-filters
-- [S12] Validation: https://docs.nestjs.com/techniques/validation
+- [S12] Validation, mục Schema-based validation (`StandardSchemaValidationPipe`, option `schema`, mảng, OpenAPI): https://docs.nestjs.com/techniques/validation · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/application/validation.md
 - [S13] Rate limiting: https://docs.nestjs.com/security/rate-limiting
 - [S14] Passport recipe: https://docs.nestjs.com/recipes/passport
 - [S15] Authentication (`@nestjs/authentication`): https://docs.nestjs.com/security/authentication
@@ -1003,10 +1019,10 @@ Theo cột "Cần từ giai đoạn" ở mục 4.1 của spec. Chưa qua bài "x
 
 **Validation**
 
-- [S45] class-validator README: https://github.com/typestack/class-validator
-- [S46] class-transformer README: https://github.com/typestack/class-transformer
-- [S47] Source `class-validator@0.15.1`, `decorator/typechecker/IsNumber`: https://registry.npmjs.org/class-validator/-/class-validator-0.15.1.tgz
-- [S48] Source `class-transformer@0.5.1`, `TransformOperationExecutor.js`: https://registry.npmjs.org/class-transformer/-/class-transformer-0.5.1.tgz
+- [S45] Zod migration guide 3 → 4 (`z.number()` không nhận Infinity, `z.uuid()` chặt theo RFC 9562, `z.string().uuid()` deprecated, `.strict()` deprecated): https://zod.dev/v4/changelog · https://github.com/colinhacks/zod/blob/afdac65e0f80c0ccf9e8909da97c411567908b57/packages/docs/content/v4/changelog.mdx
+- [S46] Zod API (Numbers: "allows any finite number"; `z.strictObject`; discriminated unions): https://zod.dev/api · https://github.com/colinhacks/zod/blob/afdac65e0f80c0ccf9e8909da97c411567908b57/packages/docs/content/api.mdx
+- [S47] Zod 4.5 release notes ("`__proto__` is always stripped" khỏi object và record): https://github.com/colinhacks/zod/blob/afdac65e0f80c0ccf9e8909da97c411567908b57/packages/docs/content/blog/zod-4-5.mdx
+- [S48] Source `@nestjs/common@12.2.0`, `pipes/standard-schema-validation.pipe.js` + `utils/strip-proto-keys.util.js`: https://registry.npmjs.org/@nestjs/common/-/common-12.2.0.tgz · https://github.com/nestjs/nest/blob/9a95605281355d6b89401eb06002c3bc64545838/packages/common/utils/strip-proto-keys.util.ts
 
 **Thuật toán**
 
@@ -1037,6 +1053,7 @@ Theo cột "Cần từ giai đoạn" ở mục 4.1 của spec. Chưa qua bài "x
 - [S67] Node.js crypto (`randomBytes`, `randomUUID`, `timingSafeEqual`): https://nodejs.org/api/crypto.html. Hành vi kiểm tra bằng chạy thử trên Node v24.18.0
 - [S68] npm registry, phiên bản `latest` và dist-tags: `https://registry.npmjs.org/<package>/latest`, `https://registry.npmjs.org/-/package/prisma/dist-tags`
 - [S69] `@nestjs/locks`: https://www.npmjs.com/package/@nestjs/locks
+- [S70] Introducing Zod 4, mục Benchmarks (số liệu của vendor, chỉ so với Zod 3): https://zod.dev/v4 · https://github.com/colinhacks/zod/blob/afdac65e0f80c0ccf9e8909da97c411567908b57/packages/docs/content/v4/index.mdx
 
 RDP [S55][S56] chỉ liên quan tới server ở chỗ đặt trần số điểm. Rút gọn điểm là việc của client (8.2).
 
@@ -1046,6 +1063,7 @@ RDP [S55][S56] chỉ liên quan tới server ở chỗ đặt trần số điể
 
 - **Prisma 7 hay 8.** Hướng dẫn giả định Prisma 7.10.x. Nếu setup-guide cài `prisma@latest` (8.0.0-rc.27) thì mọi chỗ `$transaction`, option `timeout` / `isolationLevel`, mã lỗi `P2002` đều phải viết lại theo [S39]. Mã lỗi mới của Prisma 8 cho unique violation chưa đọc tới (trang error reference của v8 quá dài, chưa đọc hết).
 - **`meta.target` của P2002 khi dùng driver adapter** (bắt buộc từ Prisma 7 [S33]): docs không nói. Vì vậy hướng dẫn chỉ dựa vào `e.code`.
+- **Schema Zod ở 2.2:** chỉ chạy thử với 5 type element (`freedraw`, `rect`, `text`, `arrow`, `image`) và một bản rút gọn của `data`. Các type còn lại (`ellipse`, `diamond`, `line`, `sticky`, `frame`, `stamp`) và giá trị cụ thể của `align` / `arrowhead` phải tự điền theo bảng 4.2 của spec. Tốc độ validate một lô 100 op chưa đo.
 - **Prisma khai báo collation cột trong `schema.prisma`:** chưa tìm thấy trong docs v7. Hướng dẫn dùng SQL trong migration.
 - **`createMany` / `upsert` với 50.000 dòng** (giới hạn số tham số của Postgres, Prisma có tự chia lô không): chưa kiểm chứng.
 - **`disconnectSockets()` sau `emit('AccessChanged')`:** đã biết thứ tự gửi tin được bảo đảm [S27]. Việc gói ngắt tới client trước khi transport đóng hẳn thì chưa kiểm chứng.

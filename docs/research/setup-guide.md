@@ -4,7 +4,7 @@ Ngày khảo sát: 2026-10-24. Máy: Windows 11, Git Bash + PowerShell.
 
 Tài liệu này để bạn **tự gõ** từng bước. Mỗi bước có lệnh, đoạn cấu hình tối thiểu và phần "Bẫy thường gặp". Code chỉ là khung và những dòng khó nhớ của thư viện. Logic nghiệp vụ (LWW, z-index, BoardLocks…) bạn tự viết theo tài liệu thiết kế.
 
-Cách kiểm chứng: mọi phiên bản lấy bằng `npm view` ngày 2026-10-24. Toàn bộ bước 2 → 9 đã chạy thử trên một project nháp (ngoài repo): `nest new` vào thư mục có sẵn git, Prisma init/migrate/seed, app khởi động, `/health` trả `ok`, socket kết nối và nhận lỗi validate, unit test + e2e test pass, `tsc`/lint sạch. Riêng Docker chưa chạy được (Docker Desktop đang tắt), xem mục **Chưa xác minh**. Ký hiệu `[Nx]` trỏ tới mục **Nguồn**.
+Cách kiểm chứng: mọi phiên bản lấy bằng `npm view` ngày 2026-10-24. Toàn bộ bước 2 → 9 đã chạy thử trên một project nháp (ngoài repo): `nest new` vào thư mục có sẵn git, Prisma init/migrate/seed, app khởi động, `/health` trả `ok`, socket kết nối và nhận lỗi validate, unit test + e2e test pass, `tsc`/lint sạch. Phần validate bằng Zod (bước 4, 7, 8, 9) được chạy thử lại trên một project nháp thứ hai với `zod@4.6.7`, không cài `class-validator`/`class-transformer`. Riêng Docker chưa chạy được (Docker Desktop đang tắt), xem mục **Chưa xác minh**. Ký hiệu `[Nx]` trỏ tới mục **Nguồn**.
 
 Cây thư mục và quy tắc lấy từ [nestjs-folder-structure.md](nestjs-folder-structure.md) mục 4–5. Những chỗ hướng dẫn này buộc phải lệch so với cây đó được gom ở mục **12**.
 
@@ -21,7 +21,7 @@ Cây thư mục và quy tắc lấy từ [nestjs-folder-structure.md](nestjs-fol
 | `@nestjs/config` | 12.0.1 | |
 | `prisma`, `@prisma/client`, `@prisma/adapter-pg` | **7.10.1** (ghim chính xác, `--save-exact`) | Tag `latest` của `prisma` đang là `8.0.0-rc.27` (bản pre-release, API khác hẳn). Phải ghi rõ phiên bản [N7][P1][P8] |
 | `socket.io` (đi kèm `@nestjs/platform-socket.io`) / `socket.io-client` | 4.8.4 / 4.8.4 | `platform-socket.io` ghim cứng `socket.io` 4.8.4 |
-| `class-validator` / `class-transformer` | 0.15.1 / 0.5.1 | |
+| `zod` | **4.6.7** (`--save-exact`) | Dùng cho mọi validate: env, body REST, payload Socket.IO [N14][Z1]. Zod bản 4.x vẫn đổi hành vi giữa các bản minor (ví dụ 4.5 đổi cách xử lý `__proto__` [Z4]), nên ghim chính xác. **Không** cài `class-validator` / `class-transformer`: `@nestjs/common` và `@nestjs/mapped-types` chỉ khai báo chúng là peer dependency optional, còn `@nestjs/config` không cần tới [NPM2] |
 | TypeScript | 6.0.3 (template ghi `^6.0.2`) | npm `latest` đã là 7.0.2. Đừng tự nâng |
 | Vitest / Vite | 4.1.12 / 8.3.5 | npm `latest` của Vitest là 5.0.5. Giữ bản template |
 | oxlint / Prettier | 1.89.0 / 3.9.10 | Template mới dùng oxlint, **không còn ESLint** |
@@ -91,7 +91,7 @@ Repo hiện có `README.md`, `CLAUDE.md`, `docs/`, file thiết kế và `.git`.
 **Bẫy thường gặp**
 - **ESM:** mọi import tương đối phải có đuôi `.js`, kể cả khi file nguồn là `.ts`, ví dụ `import { AppModule } from './app.module.js'`. Lệnh `nest g …` tự thêm đuôi này, còn khi gõ tay thì hay quên. `main.ts` dùng `await bootstrap()` ở top-level.
 - **Đừng bật `exactOptionalPropertyTypes`.** Đã thử: `prisma7.config.ts` do Prisma sinh ra lỗi ngay (`url: string | undefined`).
-- `strictPropertyInitialization: false` là cố ý: DTO của class-validator khai báo field không có giá trị khởi tạo.
+- `strictPropertyInitialization: false` là mặc định của template. Dự án này không có DTO class (kiểu DTO lấy từ `z.infer`), nên cờ này không còn cần cho DTO. Cứ để nguyên như template.
 - `nest build` vẫn ghi ra `dist/` dù có lỗi type (đã thấy `Found 1 error(s)` nhưng app vẫn chạy). Đọc kỹ output, hoặc chạy `npx tsc --noEmit` trước khi commit.
 - `.gitattributes` ép LF. Git Bash có thể in cảnh báo `LF will be replaced by CRLF` với các file cũ. Cảnh báo này vô hại.
 
@@ -122,7 +122,7 @@ Các file tạo tay trong GĐ1 (theo cây ở mục 4):
 | `src/common/filters/ws-exception.filter.ts` | bước 7 |
 | `src/modules/board/board-locks.ts` (+ `.spec.ts`) | hàng đợi Promise theo từng bảng |
 | `src/modules/board/domain/{apply-op,z-index,permissions}.ts` (+ `apply-op.spec.ts`) | TypeScript thuần |
-| `src/modules/board/dto/`, `src/modules/realtime/dto/` | DTO class-validator |
+| `src/modules/board/dto/`, `src/modules/realtime/dto/` | schema Zod + type `z.infer` (bước 8) |
 | `src/modules/realtime/presence-tracker.ts` (+ `.spec.ts`) | |
 | `prisma/schema.prisma`, `prisma/seed.ts`, `prisma7.config.ts` | bước 6 |
 | `test/app.e2e-spec.ts`, `test/realtime.e2e-spec.ts` | bước 9 |
@@ -139,37 +139,33 @@ Các file tạo tay trong GĐ1 (theo cây ở mục 4):
 ## Bước 4. Config: `@nestjs/config` + validate
 
 ```bash
-npm i @nestjs/config@12 class-validator class-transformer
+npm i @nestjs/config@12
+npm i --save-exact zod@4.6.7
 ```
 
-`src/config/env.validation.ts` theo mẫu `validate()` trong docs [N6]:
+Từ v12, `@nestjs/config` nhận thẳng một schema chuẩn [Standard Schema](https://standardschema.dev/) (Zod, Valibot, ArkType) qua option `validationSchema`. Docs dùng Zod và khuyên dùng Zod cho dự án mới [N6][N15]. Không cần tự viết hàm `validate()`.
+
+`src/config/env.validation.ts`:
 
 ```ts
-import { plainToInstance } from 'class-transformer';
-import { IsEnum, IsInt, IsNotEmpty, IsString, Max, Min, validateSync } from 'class-validator';
+import { z } from 'zod';
 
-export enum NodeEnv { Development = 'development', Production = 'production', Test = 'test' }
-
-class EnvironmentVariables {
-  @IsEnum(NodeEnv) NODE_ENV: NodeEnv = NodeEnv.Development;   // giá trị khởi tạo = mặc định
-  @IsInt() @Min(0) @Max(65535) PORT: number = 3000;
-  @IsString() @IsNotEmpty() DATABASE_URL: string;
-  @IsString() @IsNotEmpty() CORS_ORIGIN: string;              // "http://localhost:5173,http://..."
-}
-
-export function validate(config: Record<string, unknown>) {
-  const validated = plainToInstance(EnvironmentVariables, config, { enableImplicitConversion: true });
-  const errors = validateSync(validated, { skipMissingProperties: false });
-  if (errors.length > 0) throw new Error(errors.toString());
-  return validated;
-}
+export const envSchema = z.object({          // z.object, KHÔNG phải z.strictObject (xem bẫy)
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),   // env luôn là chuỗi
+  DATABASE_URL: z.string().min(1),
+  CORS_ORIGIN: z.string().min(1),            // "http://localhost:5173,http://..."
+});
+export type Env = z.infer<typeof envSchema>;
 ```
 
 Trong `app.module.ts`:
 
 ```ts
-imports: [ConfigModule.forRoot({ isGlobal: true, validate }), /* PrismaModule, BoardModule, RealtimeModule */]
+imports: [ConfigModule.forRoot({ isGlobal: true, validationSchema: envSchema }), /* PrismaModule, BoardModule, RealtimeModule */]
 ```
+
+Đọc có kiểu: `app.get<ConfigService<Env, true>>(ConfigService).get('PORT', { infer: true })` trả về `number` (đã thử: `PORT=4123` cho ra `number 4123`). `ConfigService` trả về giá trị **sau khi** qua schema, nên `coerce` và `default` có tác dụng [N6].
 
 `.env.example` (commit file này). `.env` thì copy từ đây và **không commit**:
 
@@ -185,7 +181,11 @@ CORS_ORIGIN=http://localhost:5173
 - Mặc định `ConfigModule` đọc `.env` ở **thư mục bạn đứng khi chạy lệnh**. Biến đã có trong môi trường thật (shell, Vitest `test.env`) **thắng** giá trị trong `.env` [N6]. Bước 9 dựa vào chính điều này.
 - **`.env` chỉ được nạp lúc `ConfigModule.forRoot()` chạy.** Đã thử: đọc `process.env.CORS_ORIGIN` bên trong decorator (ví dụ `@WebSocketGateway({ cors: { origin: process.env.CORS_ORIGIN } })`) cho ra `undefined`. Với ESM, file gateway được đánh giá trước thân `app.module.ts`. Vì vậy bước 7 truyền CORS qua adapter.
 - `isGlobal: true` chỉ bỏ được việc import `ConfigModule`. Bạn vẫn phải inject `ConfigService`.
-- Chỉ dùng `@IsString()` thì chuỗi rỗng vẫn qua. Thêm `@IsNotEmpty()` cho biến bắt buộc.
+- Chỉ dùng `z.string()` thì chuỗi rỗng vẫn qua (`DATABASE_URL=` trong `.env`). Thêm `.min(1)` cho biến bắt buộc. Đã thử: app dừng với `Config validation error: DATABASE_URL: Too small: expected string to have >=1 characters`. Thiếu hẳn biến thì lỗi là `DATABASE_URL: Invalid input: expected string, received undefined`.
+- **Dùng `z.object`, đừng dùng `z.strictObject` cho env.** Object được validate là cả `process.env` (có `PATH`, `HOME`…). `z.object` bỏ qua biến lạ, và `@nestjs/config` gộp lại các biến schema không khai báo, nên chúng vẫn đọc được qua `ConfigService` [N6]. `z.strictObject` sẽ báo lỗi với mọi biến hệ thống.
+- **Có `validate` thì `validationSchema` bị bỏ qua.** Source `@nestjs/config@12.0.1` kiểm tra `validate` trước [N16]. Chỉ dùng một trong hai.
+- `z.coerce.number()` gọi `Number(x)`: `'abc'` báo lỗi, nhưng **chuỗi rỗng thành `0`** (đã thử). Với `.min(0)`, `PORT=` trong `.env` sẽ qua validate và app nghe ở cổng ngẫu nhiên. Vì vậy mẫu trên dùng `.min(1)`. `.default(3000)` chỉ áp khi biến không có mặt. Biến `z.coerce.*` thiếu hẳn mà không có `.default()` thì báo lỗi [Z1].
+- **Validate chạy ngay lúc `import` `app.module.ts`**, vì `forRoot()` được gọi trong decorator `@Module`. Đã thử: gán `process.env.DATABASE_URL` trong thân file e2e là quá muộn, ESM import chạy trước. Đặt biến trong `test.env` của Vitest (bước 9.2).
 - Đổi `.env` khi đang chạy `start:dev` thì phải restart, vì watch không theo dõi `.env`.
 
 ---
@@ -391,7 +391,7 @@ Clone mới hoặc CI chạy `npm install` là có client ngay (đã thử với
 - `prisma init` mặc định **cài "agent skills"** vào `.claude/skills/`, `.agents/skills/`, `.windsurf/skills/` và tạo `skills-lock.json` (đã thấy khi thử). Repo này có `CLAUDE.md`, nên thêm `--no-skills` để khỏi lẫn vào `.claude/`.
 - Docs Prisma trên prisma.io giờ mặc định hiển thị **Prisma 8**. Tra cứu thì mở mục `/docs/orm/v7/...`.
 - Client sinh ra là ESM (suy từ `"type": "module"`), import bằng `…/client.js`. Không cần `moduleFormat` [N7].
-- **Json:** đọc ra kiểu `Prisma.JsonValue`, ghi vào kiểu `Prisma.InputJsonValue`. Với cột `Json?`, phân biệt `Prisma.DbNull` (NULL của SQL) với `Prisma.JsonNull` (giá trị JSON `null`). Prisma không kiểm tra cấu trúc bên trong, nên DTO phải validate `data` theo `type`.
+- **Json:** đọc ra kiểu `Prisma.JsonValue`, ghi vào kiểu `Prisma.InputJsonValue`. Với cột `Json?`, phân biệt `Prisma.DbNull` (NULL của SQL) với `Prisma.JsonNull` (giá trị JSON `null`). Prisma không kiểm tra cấu trúc bên trong, nên schema Zod của op phải validate `data` theo `type` (bước 8).
 - **Khóa ghép** `@@id([boardId, id])` tạo khóa `boardId_id` cho `findUnique`/`update`/`upsert`.
 - Prisma 7 **bỏ seed tự động** trong `migrate dev`/`migrate reset`. Phải chạy `prisma db seed` tay [P5].
 - Prisma 7 không còn `$on('beforeExit')`. Dùng lifecycle hook của Nest [N7].
@@ -438,7 +438,8 @@ export class BoardGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   handleDisconnect(client: Socket) { /* presence.leave(client.id) */ }
 
   @SubscribeMessage('JoinBoard')
-  async joinBoard(@MessageBody() dto: JoinBoardDto, @ConnectedSocket() client: Socket) {
+  async joinBoard(@MessageBody({ schema: joinBoardSchema }) dto: JoinBoardDto, @ConnectedSocket() client: Socket) {
+    // joinBoardSchema / JoinBoardDto: bước 8
     await client.join(dto.boardId);
     return { ok: true };            // giá trị trả về = ack cho client
   }
@@ -460,14 +461,16 @@ export class WsExceptionFilter extends BaseWsExceptionFilter {
 }
 ```
 
-Validate trên gateway có hai cách. Cả hai đã chạy thử:
+Validate trên gateway có hai cách:
 
 | Cách | Làm gì | Client nhận khi `boardId: 'nope'` |
 |---|---|---|
-| **A (chọn)** | Một global `ValidationPipe` (bước 8) cho cả REST lẫn WS, cộng filter ở trên | `{ message: ["boardId must be a UUID"], error: "Bad Request", statusCode: 400 }` |
-| B | **Không** có global pipe. Gateway dùng `@UsePipes(new ValidationPipe({ …, exceptionFactory: (e) => new WsException(e) }))` như docs [N10], còn REST gắn pipe riêng ở từng controller | mảng `ValidationError[]` (có cả `value` client đã gửi) |
+| **A (chọn)** | Một global `StandardSchemaValidationPipe` (bước 8) cho cả REST lẫn WS, cộng filter ở trên. Đã chạy thử với Zod | `{ message: ["boardId: Invalid UUID"], error: "Bad Request", statusCode: 400 }` |
+| B | **Không** có global pipe. Gateway dùng `@UsePipes(new StandardSchemaValidationPipe({ exceptionFactory: (issues) => new WsException(issues) }))` như docs [N10], còn REST gắn pipe riêng ở từng controller | mảng issue gốc của Zod (chưa chạy thử với Zod) |
 
-Kết hợp global pipe **với** `@UsePipes(...exceptionFactory)` trên gateway mà không có filter thì **không chạy**. Đã thử: global pipe chạy trước, ném `BadRequestException`, nên client vẫn nhận `"Internal server error"`.
+Chọn A vì chỉ cần một pipe cho cả app, REST nhận đúng 400, và thông báo lỗi ở hai phía có cùng định dạng `path: message`. Filter vẫn cần cho mọi `BadRequestException` khác ném từ handler WS.
+
+Kết hợp global pipe **với** `@UsePipes(...exceptionFactory)` trên gateway mà không có filter thì **không chạy**: global pipe chạy trước và ném `BadRequestException`, nên client vẫn nhận `"Internal server error"` [N10]. Đã thử điều này với `ValidationPipe`. `StandardSchemaValidationPipe` dùng cùng cơ chế pipe nên kết quả như nhau.
 
 ### 7.4 Gắn vào `main.ts`
 
@@ -477,38 +480,82 @@ app.useWebSocketAdapter(new SocketIoAdapter(app, config.getOrThrow<string>('CORS
 ```
 
 **Bẫy thường gặp**
-- **Global `ValidationPipe` (bước 8) cũng chạy cho gateway** [N10]. Nó ném `BadRequestException`, và client chỉ nhận `{"status":"error","message":"Internal server error"}` (đã thử). Mẫu trong docs gắn `@UsePipes(new ValidationPipe({ exceptionFactory: e => new WsException(e) }))` lên gateway. Nhưng khi đã có global pipe, global pipe chạy **trước** và ném lỗi trước. Vì vậy dùng filter ở 7.3 để đổi `BadRequestException` thành `WsException`. Sau khi có filter, client nhận sự kiện `exception` có `message: ["boardId must be a UUID", …]` (đã thử).
+- **Global `StandardSchemaValidationPipe` (bước 8) cũng chạy cho gateway** [N10]. Mặc định nó ném `BadRequestException`, và "only a `WsException` reaches the client with its own message" [N10]: client chỉ nhận `{"status":"error","message":"Internal server error"}`. Mẫu trong docs gắn `@UsePipes(new StandardSchemaValidationPipe({ exceptionFactory: (issues) => new WsException(issues) }))` lên gateway. Nhưng khi đã có global pipe, global pipe chạy **trước** và ném lỗi trước. Vì vậy dùng filter ở 7.3 để đổi `BadRequestException` thành `WsException`. Sau khi có filter, client nhận sự kiện `exception` có `message: ["boardId: Invalid UUID", "Unrecognized key: \"sneaky\""]` (đã thử). Thông báo của Zod không chứa giá trị client gửi, chỉ có đường dẫn và tên khóa lạ.
 - **Global exception filter không áp dụng cho gateway** [N11]. Phải gắn `@UseFilters()` ở class gateway.
 - **`handleConnection` không phải là cổng chặn.** Nest không đợi nó chạy xong, nên tin nhắn đến sớm vẫn được xử lý. Kiểm tra auth khi kết nối thì dùng `server.use()` trong `afterInit`, kiểm tra từng tin thì dùng guard [N12].
 - **CORS chỉ áp dụng cho long-polling, không áp dụng cho WebSocket** [S2]. Client dùng `transports: ['websocket']` thì CORS không chặn được gì. Đã thử với polling: origin hợp lệ nhận header `Access-Control-Allow-Origin`, origin lạ thì không có header.
 - Tin vượt `maxHttpBufferSize` **làm đóng socket**, không sinh exception [S1]. Client sẽ thấy disconnect.
 - Ném `WsException` với object thì Nest gửi nguyên object đó, không bọc thêm `status`/`cause` [N11]. Client cần xử lý cả hai dạng.
-- **`includeCause` mặc định là `true`**: với lỗi dạng chuỗi và lỗi lạ (`Internal server error`), `BaseWsExceptionFilter` gửi kèm `cause: { pattern, data }`. Nghĩa là payload client gửi bị gửi ngược lại nguyên văn (đã thấy `cause.data = { boardId: "nope", … }`), có thể tới 100 KB mỗi lỗi. `causeFactory: (pattern) => ({ pattern })` chỉ giữ tên sự kiện. Hoặc dùng `includeCause: false` để bỏ hẳn [N11].
+- **`includeCause` mặc định là `true`**: với lỗi dạng chuỗi và lỗi lạ (`Internal server error`), `BaseWsExceptionFilter` gửi kèm `cause: { pattern, data }`. Nghĩa là payload client gửi bị gửi ngược lại nguyên văn (đã thấy `cause.data = { boardId: "nope", … }`), có thể tới 100 KB mỗi lỗi. `causeFactory: (pattern) => ({ pattern })` chỉ giữ tên sự kiện. Đã thử với một handler ném `Error` lạ: client nhận `{"status":"error","message":"Internal server error","cause":{"pattern":"Boom"}}`, không có `data`. Hoặc dùng `includeCause: false` để bỏ hẳn [N11].
 - Gateway chỉ được khởi tạo khi nằm trong `providers` của một module đã được import [N12].
 
 **Commit 4:** `feat(realtime): board gateway + ws validation`.
 
 ---
 
-## Bước 8. Global `ValidationPipe`
+## Bước 8. Global `StandardSchemaValidationPipe` + schema Zod
+
+NestJS 12 có sẵn `StandardSchemaValidationPipe` trong `@nestjs/common`, và option `schema` trên `@Body()`, `@Query()`, `@Param()`, `@MessageBody()` [N14][N15]. Docs ghi rõ: muốn validate bằng schema trong production thì dùng pipe có sẵn này, thay vì tự viết `ZodValidationPipe` như ví dụ ở trang Pipes [N17]. Không cần gói ngoài `nestjs-zod`.
 
 `main.ts` (đầy đủ phần khung):
 
 ```ts
 const app = await NestFactory.create(AppModule);
-const config = app.get(ConfigService);
-app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
-app.useWebSocketAdapter(new SocketIoAdapter(app, config.getOrThrow<string>('CORS_ORIGIN').split(',')));
+const config = app.get<ConfigService<Env, true>>(ConfigService);
+app.useGlobalPipes(new StandardSchemaValidationPipe());          // từ '@nestjs/common'
+app.useWebSocketAdapter(new SocketIoAdapter(app, config.get('CORS_ORIGIN', { infer: true }).split(',')));
 app.enableShutdownHooks();
-await app.listen(config.get<number>('PORT') ?? 3000);
+await app.listen(config.get('PORT', { infer: true }));
 ```
 
-- `whitelist`: bỏ các field không có decorator. `forbidNonWhitelisted`: báo lỗi thay vì lặng lẽ bỏ. `transform`: biến payload thành instance DTO và đổi kiểu cho param/query [N10]. Đã thử: `dto instanceof JoinBoardDto === true` trong gateway.
-- Để e2e chạy đúng cấu hình như production (mục 9), có thể tách ba dòng `useGlobalPipes`/`useWebSocketAdapter` ra một hàm `setupApp(app)` trong file riêng, ví dụ `src/app.setup.ts`. Không đặt hàm này trong `main.ts`, vì `main.ts` gọi `bootstrap()` ngay khi bị import.
+Schema đặt trong `dto/` của feature, kiểu lấy bằng `z.infer`, không có DTO class. Đặt tên file `*.dto.ts` như ví dụ trong docs [N14], nên cây thư mục không đổi:
+
+```ts
+// src/modules/realtime/dto/join-board.dto.ts
+import { z } from 'zod';
+
+export const joinBoardSchema = z.strictObject({
+  boardId: z.uuid(),
+  displayName: z.string().trim().min(1).max(50),
+  clientId: z.uuid(),
+  lastSeq: z.int().min(0).optional(),
+  shareToken: z.string().max(100).optional(),
+});
+export type JoinBoardDto = z.infer<typeof joinBoardSchema>;
+```
+
+```ts
+// REST, cùng cách viết
+@Post()
+create(@Body({ schema: createBoardSchema }) dto: CreateBoardDto) { ... }
+```
+
+Đã thử trên Express: body hợp lệ thì 201 và handler nhận giá trị **sau** schema (`title: '  Hi '` thành `'Hi'` nhờ `.trim()`). Body sai thì 400:
+
+```json
+{ "message": ["title: Invalid input: expected string, received number"], "error": "Bad Request", "statusCode": 400 }
+```
+
+Ba option cũ của `ValidationPipe` giờ nằm ở đâu:
+
+| `ValidationPipe` | Với Zod + `StandardSchemaValidationPipe` |
+|---|---|
+| `whitelist` (bỏ field lạ) | `z.object()` |
+| `forbidNonWhitelisted` (báo lỗi field lạ) | `z.strictObject()`. Đã thử: `{ title, admin: true }` ra 400 `Unrecognized key: "admin"` [N14] |
+| `transform` | Mặc định `transform: true`: handler nhận output của schema, nên `.trim()`, `.default()`, `z.coerce` có tác dụng [N14] |
+
+Dùng `z.strictObject()` cho mọi payload từ client (REST và WS), để giữ hành vi `forbidNonWhitelisted` của bản cũ. `.strict()` vẫn chạy, nhưng hướng dẫn chuyển đổi của Zod 4 ghi nó là deprecated và khuyên dùng `z.strictObject()` [Z1].
+
+- Pipe chỉ validate tham số **có** `schema`. Tham số khác (`@ConnectedSocket()`, `@Req()`…) đi qua nguyên vẹn, nên gắn global là an toàn [N14].
+- Trước khi validate, pipe tự xóa đệ quy các khóa `__proto__`, `prototype`, `constructor` khỏi payload (`stripProtoKeys` trong source [N18]). Đã thử qua cả REST lẫn socket: payload có ba khóa đó vẫn qua `z.strictObject` vì chúng đã bị xóa trước, và `({}).polluted` vẫn `undefined`.
+- Để e2e chạy đúng cấu hình như production (mục 9), có thể tách hai dòng `useGlobalPipes`/`useWebSocketAdapter` ra một hàm `setupApp(app)` trong file riêng, ví dụ `src/app.setup.ts`. Không đặt hàm này trong `main.ts`, vì `main.ts` chạy `bootstrap()` ngay khi bị import.
+- Nếu sau này thêm `@nestjs/swagger`: Zod từ 4.2 có `~standard.jsonSchema`, và Nest tự chuyển schema thành OpenAPI, không phải cấu hình gì [N19].
 
 **Bẫy thường gặp**
-- DTO lồng nhau (ops chứa element) cần `@ValidateNested({ each: true })` **và** `@Type(() => ElementDto)` (của class-transformer). Thiếu `@Type` thì object con không được validate.
-- `forbidNonWhitelisted` bắt mọi field lạ, kể cả field client gửi thừa. Field `data` có cấu trúc thay đổi theo `type`, nên phải tự validate riêng (mục 8.3).
+- **Quên `{ schema }` thì không có validate nào cả.** `@Body() dto: CreateBoardDto` vẫn compile vì `CreateBoardDto` chỉ là type, và pipe cho tham số không có schema đi qua nguyên vẹn [N14]. Với class-validator, chỉ cần kiểu là một class là pipe tự validate. Với schema thì không, và TypeScript không bắt được lỗi này. E2e phải có ít nhất một test "payload sai thì bị từ chối" cho mỗi handler.
+- **Không lồng `z.union()` vào trong `z.discriminatedUnion()`.** Đã thử với Zod 4.6.7: TypeScript báo lỗi kiểu, và nếu ép qua thì lần `parse` đầu tiên ném `Error: Invalid discriminated union option at index "…"`. Đây là exception thường, nên client nhận "Internal server error". Với op `restore` (`elementId` **hoặc** `clearSeq`), dùng một object có hai field optional cộng `.refine()` (xem `implementation-guide.md` mục 2.2).
+- Field `data` có cấu trúc thay đổi theo `type`: dùng `z.discriminatedUnion('type', [...])` cho element, mỗi type một `z.strictObject` cho `data`. Còn `patch` của `update` không biết type element lúc validate, nên schema chỉ kiểm tra hình dạng chung, domain kiểm tra phần còn lại (mục 8.3 của spec).
+- Lỗi đổi tên từ Zod 3 hay gặp [Z1]: `message` đổi thành `error` trong tham số; `invalid_type_error`/`required_error` bị bỏ; `z.string().uuid()`/`.email()` thành `z.uuid()`/`z.email()`; `z.record()` bắt buộc có hai đối số; `.merge()` thành `.extend()`; `error.format()`/`.flatten()` thành `z.treeifyError()` (cần chuỗi dễ đọc thì `z.prettifyError()` [Z3]); `z.number()` tự từ chối `NaN` và `±Infinity`, `.finite()` giờ không làm gì. Ví dụ trên mạng phần lớn vẫn là Zod 3.
 - Trên Windows, `SIGTERM` **không bao giờ** tới được tiến trình. Ctrl+C (`SIGINT`) thì được [N8].
 
 ---
@@ -522,10 +569,10 @@ Runner là **Vitest** (template ESM). Unit spec đặt cạnh file, e2e nằm tr
 Thêm vào `vitest.config.ts`:
 
 ```ts
-test: { globals: true, root: './', include: ['**/*.spec.ts'], setupFiles: ['reflect-metadata'] },
+test: { globals: true, root: './', include: ['**/*.spec.ts'] },
 ```
 
-Ví dụ nên viết đầu tiên: `src/config/env.validation.spec.ts`, kiểm tra `PORT: '4000'` thành `4000`, và thiếu `DATABASE_URL` thì throw. Mock Prisma trong unit test bằng `{ provide: PrismaService, useValue: { board: { findUnique: vi.fn() } } }` [N7].
+Ví dụ nên viết đầu tiên: `src/config/env.validation.spec.ts`, gọi thẳng `envSchema.safeParse(...)`, không cần Nest. Kiểm tra `PORT: '4000'` thành `4000`, thiếu hoặc rỗng `DATABASE_URL` thì `success === false`, `PORT: 'abc'` bị từ chối (đã thử, 3 test pass). Spec cho schema op (`op.dto.spec.ts`) viết cùng kiểu. Mock Prisma trong unit test bằng `{ provide: PrismaService, useValue: { board: { findUnique: vi.fn() } } }` [N7].
 
 ### 9.2 E2E với test DB
 
@@ -595,7 +642,7 @@ npm test -- src/modules/board                                     # lọc theo �
 ```
 
 **Bẫy thường gặp**
-- **`Reflect.getMetadata is not a function`**: spec không import gì của `@nestjs/*`, nên không ai nạp `reflect-metadata`, mà class-transformer lại cần nó (đã gặp khi thử). `setupFiles: ['reflect-metadata']` sửa được lỗi này. Code trong `domain/` không dùng decorator nên không bị ảnh hưởng.
+- Không cần `setupFiles: ['reflect-metadata']`. Lỗi `Reflect.getMetadata is not a function` trước đây đến từ class-transformer. Zod không dùng decorator, còn spec nào import `@nestjs/common` hay `@nestjs/core` thì đã được hai gói đó nạp `reflect-metadata` (đọc `index.js` của chúng). Đã thử: env spec chạy không có `setupFiles`.
 - Gọi `app.init()` thì gateway chưa nhận kết nối được, cần `app.listen(0)`.
 - `createNestApplication()` **không** chạy `main.ts`. Pipe, adapter và filter toàn cục phải gắn lại trong test, nếu không test pass nhưng production chạy khác.
 - Pattern `**/*.spec.ts` không khớp `*.e2e-spec.ts` (vì `-spec` khác `.spec`), nên `npm test` không chạy lẫn e2e.
@@ -640,7 +687,9 @@ npm test -- src/modules/board                                     # lọc theo �
 - [ ] `npx prisma db seed` chạy xong không lỗi.
 - [ ] Xóa `DATABASE_URL` khỏi `.env` thì `npm run start:dev` **dừng ngay** với lỗi validate. Trả lại thì app khởi động.
 - [ ] `curl localhost:3000/health` trả `{"status":"ok"}` (có chạy `SELECT 1` qua Prisma).
-- [ ] Client socket.io kết nối được, `emitWithAck('JoinBoard', {boardId: <uuid>})` trả `{ ok: true }`. Gửi `boardId: 'x'` thì nhận sự kiện `exception` có thông báo validate, không phải `Internal server error`.
+- [ ] Client socket.io kết nối được, `emitWithAck('JoinBoard', {boardId: <uuid>})` trả `{ ok: true }`. Gửi `boardId: 'x'` thì nhận sự kiện `exception` có `message: ["boardId: Invalid UUID"]`, không phải `Internal server error`. Gửi thêm khóa lạ thì có `Unrecognized key`.
+- [ ] `POST` body sai kiểu hoặc có khóa lạ thì 400, `message` dạng `path: lỗi`.
+- [ ] `npm ls class-validator class-transformer` ra `(empty)`. `npm ls zod` ra `4.6.7`.
 - [ ] `npm test` và `npm run test:e2e` pass, ít nhất có `env.validation.spec.ts`, `app.e2e-spec.ts`, `realtime.e2e-spec.ts`.
 - [ ] `npm run lint` và `npx tsc --noEmit` sạch.
 - [ ] `git status` không có `.env`, `src/generated/`, `dist/`, `.claude/skills/` của Prisma.
@@ -667,14 +716,20 @@ NestJS (docs đọc từ `nestjs/docs.nestjs.com` @ `952c9c5`, 2026-10-23):
 - [N3] Schematic `application` (template `ts-esm`, mặc định `type: esm`, `packageManager: npm`, prompt module system): https://github.com/nestjs/schematics/blob/a7e0f2d1a8b2161359c0eeede945c976faf60916/src/lib/application/application.factory.ts · https://github.com/nestjs/schematics/blob/a7e0f2d1a8b2161359c0eeede945c976faf60916/src/lib/application/schema.json · https://github.com/nestjs/schematics/tree/a7e0f2d1a8b2161359c0eeede945c976faf60916/src/lib/application/files/ts-esm
 - [N4] `nest new` action (git init, `createGitIgnoreFile` chỉ khi không `--skip-git`, prompt observe): https://github.com/nestjs/nest-cli/blob/master/actions/new.action.ts (đọc trong gói npm `@nestjs/cli@12.0.10`, file `actions/new.action.js`)
 - [N5] typescript-starter (`"type": "module"`, vitest, oxlint, TS ^6.0.2): https://github.com/nestjs/typescript-starter/blob/0b6d71261ba30bb6976949a8653e4a86479a68c1/package.json
-- [N6] Configuration (validate, thứ tự ưu tiên env, isGlobal): https://docs.nestjs.com/application/configuration · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/application/configuration.md
+- [N6] Configuration (`validationSchema` nhận Standard Schema/Zod, giá trị sau schema được `ConfigService` trả về, biến lạ vẫn giữ, thứ tự ưu tiên env, isGlobal): https://docs.nestjs.com/application/configuration · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/application/configuration.md
 - [N7] Prisma recipe (Prisma 7, cảnh báo tag `latest`, `prisma7.config.ts`, adapter bắt buộc, PrismaService, lifecycle, transaction, mock): https://docs.nestjs.com/recipes/prisma · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/data/prisma.md
 - [N8] Lifecycle events (enableShutdownHooks, Windows không có SIGTERM): https://docs.nestjs.com/fundamentals/lifecycle-events · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/fundamentals/lifecycle-events.md
 - [N9] WebSocket adapter (kế thừa `IoAdapter.createIOServer`): https://docs.nestjs.com/websockets/adapter · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/websockets/adapter.md
-- [N10] Validation (whitelist/forbidNonWhitelisted/transform) và WS pipes (global pipe áp dụng cho gateway, chỉ `WsException` tới được client): https://docs.nestjs.com/application/validation · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/application/validation.md · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/websockets/pipes.md
+- [N10] Validation và WS pipes (global pipe áp dụng cho gateway, chỉ `WsException` tới được client, `@MessageBody({ schema })` + `StandardSchemaValidationPipe` với `exceptionFactory`): https://docs.nestjs.com/application/validation · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/application/validation.md · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/websockets/pipes.md
 - [N11] WS exception filters (global filter không áp dụng cho gateway, `BaseWsExceptionFilter`): https://docs.nestjs.com/websockets/exception-filters · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/websockets/exception-filters.md
 - [N12] Gateways (lifecycle hook, `handleConnection` không phải cổng chặn, `server.use()`): https://docs.nestjs.com/websockets/gateways · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/websockets/gateways.md
 - [N13] Testing (Vitest mặc định, e2e trong `test/`, `.e2e-spec`): https://docs.nestjs.com/fundamentals/testing · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/fundamentals/unit-testing.md
+- [N14] Schema-based validation (`StandardSchemaValidationPipe`, option `schema`, `transform`, `z.object`/`z.strictObject`/`z.looseObject`, định dạng lỗi `path: message`): https://docs.nestjs.com/application/validation#schema-based-validation · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/application/validation.md
+- [N15] Migration v11 → v12 (route decorator schemas, `@nestjs/config` chuyển sang Standard Schema, khuyên Zod cho dự án mới): https://docs.nestjs.com/migration-guide · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/migration.md
+- [N16] Source `@nestjs/config@12.0.1`, `dist/config.module.js` (`validate` được xét trước `validationSchema`, gộp lại biến không khai báo) và `dist/utils/validate-with-schema.util.js`: https://registry.npmjs.org/@nestjs/config/-/config-12.0.1.tgz
+- [N17] Pipes ("For schema-based validation in production, use the built-in `StandardSchemaValidationPipe`", ví dụ `ZodValidationPipe` tự viết chỉ để minh họa): https://docs.nestjs.com/pipes · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/pipes.md
+- [N18] Source `StandardSchemaValidationPipe` và `stripProtoKeys`: https://github.com/nestjs/nest/blob/9a95605281355d6b89401eb06002c3bc64545838/packages/common/pipes/standard-schema-validation.pipe.ts · https://github.com/nestjs/nest/blob/9a95605281355d6b89401eb06002c3bc64545838/packages/common/utils/strip-proto-keys.util.ts (đọc bản build trong `@nestjs/common@12.2.0`)
+- [N19] OpenAPI, Standard Schema (Zod ≥ 4.2 có `~standard.jsonSchema`): https://docs.nestjs.com/openapi/introduction · https://github.com/nestjs/docs.nestjs.com/blob/952c9c5af4592d33aa7f859fd772ce91dc30dfab/content/openapi/introduction.md
 - [N20] Node.js release schedule: https://github.com/nodejs/Release/blob/main/schedule.json · danh sách bản phát hành: https://nodejs.org/dist/index.json
 
 Prisma:
@@ -691,6 +746,13 @@ Socket.IO:
 - [S1] Server options (`maxHttpBufferSize` mặc định 1e6, quá thì đóng socket; `cors`): https://socket.io/docs/v4/server-options/
 - [S2] Handling CORS (bắt buộc từ v3, chỉ áp dụng cho HTTP long-polling): https://socket.io/docs/v4/handling-cors/
 - [S3] Client API (`emitWithAck`): https://socket.io/docs/v4/client-api/
+
+Zod (docs đọc từ `colinhacks/zod` @ `afdac65`, 2026-10-19, thư mục `packages/docs/content/`):
+- [Z1] Migration guide Zod 3 → 4 (`error` thay `message`, bỏ `invalid_type_error`, `z.uuid()` chặt theo RFC 9562, `z.guid()`, `z.number()` không nhận Infinity, `z.coerce` input `unknown`, `.default()` đổi nghĩa, `.strict()`/`.passthrough()` deprecated, `z.record()` hai đối số, `.merge()` deprecated): https://zod.dev/v4/changelog · https://github.com/colinhacks/zod/blob/afdac65e0f80c0ccf9e8909da97c411567908b57/packages/docs/content/v4/changelog.mdx
+- [Z2] API (`z.number()` "allows any finite number", `z.strictObject`, `z.discriminatedUnion`): https://zod.dev/api · https://github.com/colinhacks/zod/blob/afdac65e0f80c0ccf9e8909da97c411567908b57/packages/docs/content/api.mdx
+- [Z3] Formatting errors (`z.prettifyError`, `z.treeifyError`): https://zod.dev/error-formatting
+- [Z4] Zod 4.5 release notes ("`__proto__` is always stripped", `.strict()` báo `__proto__` là khóa lạ): https://github.com/colinhacks/zod/blob/afdac65e0f80c0ccf9e8909da97c411567908b57/packages/docs/content/blog/zod-4-5.mdx
+- Phiên bản: `npm view zod dist-tags` (`latest` = 4.6.7, phát hành 2026-10-12)
 
 Docker:
 - [D1] Image `postgres` (PGDATA/VOLUME đổi từ bản 18, initdb.d, POSTGRES_*): https://hub.docker.com/_/postgres · https://github.com/docker-library/docs/blob/master/postgres/content.md · tag (18.6, 19rc1): https://hub.docker.com/_/postgres/tags
@@ -715,7 +777,8 @@ npm:
 - Ctrl+C trên Windows có gọi `onModuleDestroy` hay không: theo docs [N8], chưa thử.
 - Prisma 8 dự kiến GA trong 10/2026 [P1]. Nếu GA trước khi bạn làm, `@prisma/client@latest` cũng sẽ nhảy lên 8. Lệnh trong hướng dẫn đã ghi `@7` để tránh, nhưng docs NestJS có thể đổi ngay sau đó.
 - TypeScript 7, Vitest 5, Node 26 chưa thử với Nest 12. Hướng dẫn giữ đúng phiên bản template.
-- `@IsNotEmpty()` trong `env.validation.ts` chưa chạy thử (bản thử chỉ có `@IsString()`).
-- `causeFactory: (pattern) => ({ pattern })` đã qua `tsc` và e2e (lỗi validate), nhưng chưa thử với lỗi lạ (`Internal server error`) để xem `cause.data` có thật sự biến mất không.
+- Phần Zod chạy thử trên project nháp riêng (Nest 12.2.0, `@nestjs/config` 12.0.1, Express, không có Prisma hay DB). Chưa chạy chung với Prisma trong cùng một app.
+- Cách B ở bước 7.3 (pipe riêng trên gateway với `exceptionFactory`) chưa chạy thử với Zod. Hình dạng mảng issue client nhận được chỉ suy từ docs.
+- Chuyển schema Zod sang OpenAPI qua `@nestjs/swagger` [N19]: chưa thử, dự án chưa dùng Swagger.
 - `--save-exact` cho ba gói Prisma: chưa chạy thử. Bản thử dùng `prisma@7` / `@prisma/client@7`, cũng ra 7.10.1.
 - Một số URL docs.nestjs.com chưa mở thử. `/application/configuration`, `/application/validation`, `/fundamentals/testing` lấy theo link nội bộ trong chính docs; `/recipes/prisma` là suy đoán. Nội dung đã đọc từ link GitHub đi kèm, được ghim theo commit.

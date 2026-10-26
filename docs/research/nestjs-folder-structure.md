@@ -15,7 +15,7 @@ Ngày khảo sát: 2026-10-24. Mọi repo được đọc trực tiếp bằng `
 | E2E test | "Keep your e2e test files inside the `test` directory. Test files should have an `.e2e-spec` suffix." | [S4] |
 | Gateway là provider | "Gateways are providers: they can inject dependencies through the class constructor, and other classes (providers and controllers) can inject them." Nên dùng singleton, trừ khi thật sự cần state theo từng connection. | [S5] |
 | Prisma | `prisma/schema.prisma` và `prisma/migrations/` ở gốc project. Client được generate vào `src/generated/prisma`. `src/prisma/prisma.service.ts` + `PrismaModule`, có thể đánh dấu `@Global()`. | [S6] |
-| Config | `ConfigModule.forRoot({ isGlobal: true })`, file cấu hình nằm trong `config/`, validate bằng `validationSchema` (Zod/Standard Schema) hoặc hàm `validate()` trong `env.validation.ts` dùng class-validator. | [S7] |
+| Config | `ConfigModule.forRoot({ isGlobal: true })`, file cấu hình nằm trong `config/`, validate bằng `validationSchema` (Zod/Standard Schema, docs khuyên dùng cho dự án mới) hoặc hàm `validate()` tự viết. SyncBoard dùng `validationSchema` với Zod, schema đặt trong `env.validation.ts`. | [S7] |
 | Circular dependency | "Avoid circular dependencies where possible". Không dùng barrel file (`index.ts`) cho class module/provider vì dễ gây vòng lặp import. | [S8] |
 
 **Output thực tế của CLI** (đọc thẳng từ template, không qua docs):
@@ -140,7 +140,7 @@ SyncBoard_BE/
 │  ├─ main.ts
 │  ├─ app.module.ts
 │  ├─ config/
-│  │  └─ env.validation.ts             # validate() cho ConfigModule [S7]
+│  │  └─ env.validation.ts             # schema Zod cho validationSchema của ConfigModule [S7]
 │  ├─ common/                          # dùng xuyên module; chỉ thêm khi đã có >= 2 module dùng
 │  │  ├─ decorators/                   # GĐ4: current-user.decorator.ts
 │  │  ├─ filters/                      # all-exceptions.filter.ts, ws-exception.filter.ts
@@ -240,11 +240,11 @@ Chiều gateway → service khớp với template của CLI [S13]. Việc phát 
 
 1. Một feature = một thư mục = một `*.module.ts`. Tạo bằng `nest g resource <tên>` hoặc `nest g module/service/gateway` để giữ đúng cách đặt tên của CLI.
 2. Tên file kebab-case dạng `<name>.<type>.ts`, thư mục số ít. Không trộn với camelCase.
-3. DTO nằm trong `dto/` của feature. Validate ở biên: `ValidationPipe` cho REST và cả `@MessageBody()` của gateway.
+3. DTO (schema Zod + type `z.infer`) nằm trong `dto/` của feature. Validate ở biên: `StandardSchemaValidationPipe` cho REST và cả `@MessageBody({ schema })` của gateway.
 4. Code dùng riêng cho một feature thì để trong feature. Chỉ đưa lên `common/` khi đã có 2 module dùng.
 5. Phụ thuộc chỉ chạy một chiều: gateway/controller → service → `infra/`. Không module nào import gateway; cần phát tin thì dùng `SocketEmitter`. `infra/` không chứa nghiệp vụ, `domain/` không import NestJS hay Prisma. Không dùng `forwardRef`.
 6. Không dùng barrel `index.ts` cho module/provider [S8].
-7. `ConfigModule.forRoot({ isGlobal: true, validate })` ngay từ GĐ1, để thiếu biến môi trường là app báo lỗi khi khởi động [S7].
+7. `ConfigModule.forRoot({ isGlobal: true, validationSchema: envSchema })` ngay từ GĐ1, để thiếu biến môi trường là app báo lỗi khi khởi động [S7].
 8. `PrismaModule` khai báo `@Global()` một lần. Schema và migrations nằm ở `prisma/` gốc. Commit `migrations/`, không commit `src/generated/` [S6].
 9. Unit test `*.spec.ts` đặt cạnh file. E2E `*.e2e-spec.ts` nằm trong `test/` [S4][S10].
 10. Giữ standard mode cho tới khi thật sự có app thứ hai [S3].

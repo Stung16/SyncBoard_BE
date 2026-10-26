@@ -4,7 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Design stage only: no `package.json` or source code yet, so there are no build/lint/test commands. When the app is scaffolded (NestJS CLI, standard mode), add the real commands here. Documents are written in Vietnamese; keep that language when editing them.
+Setup done (GĐ1 skeleton): config, Prisma + migrations, health check, Socket.IO gateway shell with Zod validation, e2e harness. Business logic files (`board-locks.ts`, `domain/*`, `presence-tracker.ts`) are intentionally empty — the user writes them; their specs hold `it.todo` cases. Documents are written in Vietnamese; keep that language when editing them.
+
+## Commands
+
+```bash
+docker compose up -d                 # Postgres 18 on localhost:5433 (5432 is taken by a native install); creates syncboard + syncboard_test
+npm run start:dev                    # app on :3000, GET /health
+npx tsc --noEmit && npm run lint     # tsc also checks test/, prisma/seed.ts (nest build doesn't)
+npm test                             # unit (Vitest, *.spec.ts next to source)
+npm run test:e2e                     # e2e (test/*.e2e-spec.ts); runs `migrate deploy` on TEST_DATABASE_URL first
+npx vitest run path/to/file.spec.ts -t "test name"   # single file / single test
+npx prisma migrate dev --name <x> && npx prisma generate   # Prisma 7: migrate dev does NOT generate or seed
+npx prisma db seed                   # demo board 0192f000-0000-7000-8000-000000000001
+```
+
+ESM: relative imports need the `.js` suffix. Global pipe/adapter/shutdown hooks live in `src/app.setup.ts` (`setupApp`) so `main.ts` and e2e tests share them; e2e must call `setupApp(app)` and `app.listen(0)` for the gateway to accept connections.
 
 - `SyncBoard — Phân tích thiết kế.md` — the design spec (data model, event protocol, use cases per feature level 1–8, concurrency, permissions). Source of truth for behavior.
 - `docs/research/nestjs-folder-structure.md` — researched folder structure with cited sources; the tree in section 4 is the one to follow.
@@ -15,7 +30,7 @@ The user codes the project themselves from these guides: explain and review rath
 
 ## Stack
 
-NestJS 12 (ESM, scaffolded by `nest new`: Vitest + oxlint + Prettier, npm, Node 24 LTS), Socket.IO 4.8, Prisma **7.10.1 pinned exactly** with `@prisma/adapter-pg` (npm `latest` for `prisma` is a Prisma 8 RC with a different transaction/error API — never upgrade implicitly), PostgreSQL 18 via `compose.yaml`, `@nestjs/schedule`, `@nestjs/passport` + `@nestjs/jwt`, `class-validator` DTOs, `fractional-indexing` for z-index, `argon2` for passwords. Prisma config file is `prisma7.config.ts`. Not .NET — the design was migrated from ASP.NET/SignalR; don't reintroduce those terms.
+NestJS 12 (ESM, scaffolded by `nest new`: Vitest + oxlint + Prettier, npm, Node 24 LTS), Socket.IO 4.8, Prisma **7.10.1 pinned exactly** with `@prisma/adapter-pg` (npm `latest` for `prisma` is a Prisma 8 RC with a different transaction/error API — never upgrade implicitly), PostgreSQL 18 via `compose.yaml`, `@nestjs/schedule`, `@nestjs/passport` + `@nestjs/jwt`, Zod 4 (`zod@4.6.7` pinned) for all validation — env via `ConfigModule` `validationSchema`, REST/WS via the built-in global `StandardSchemaValidationPipe` with `@Body({ schema })` / `@MessageBody({ schema })`, types via `z.infer`, no DTO classes and no `class-validator`/`class-transformer`; HTTP stays Express, `fractional-indexing` for z-index, `argon2` for passwords. Prisma config file is `prisma7.config.ts`. Not .NET — the design was migrated from ASP.NET/SignalR; don't reintroduce those terms.
 
 ## Architecture (big picture)
 

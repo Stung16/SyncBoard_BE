@@ -1,0 +1,21 @@
+name: syncboard
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: syncboard
+      POSTGRES_PASSWORD: syncboard
+      POSTGRES_DB: syncboard
+    ports:
+      - "5433:5432"                 # 5432 trên máy đã bị PostgreSQL native chiếm
+    volumes:
+      - pgdata:/var/lib/postgresql  # Postgres 18+: mount ở đây, KHÔNG phải .../data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  pgdata:

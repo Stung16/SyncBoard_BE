@@ -590,7 +590,7 @@ REST kiểm tra quyền ở mỗi request, quen thuộc. Socket.IO khác: kết 
 
 Các con số trên là điểm khởi đầu hợp lý, không phải tiêu chuẩn. Đo thực tế rồi chỉnh.
 
-Kiểm tra dữ liệu dùng `class-validator` trên DTO và `ValidationPipe` gắn vào gateway (`@UsePipes(...)`). Lỗi trong gateway ném `WsException` thay vì `HttpException`.
+Kiểm tra dữ liệu dùng schema Zod (`@Body({ schema })`, `@MessageBody({ schema })`) với `StandardSchemaValidationPipe` có sẵn của NestJS 12. Lỗi trong gateway phải tới client dưới dạng `WsException` thay vì `HttpException`.
 
 Khi vượt giới hạn tốc độ: lần đầu bỏ qua tin, nhiều lần thì ngắt kết nối. Dùng thuật toán "token bucket": mỗi connection có một xô chứa tối đa N lượt, mỗi giây được thêm lượt mới, gửi tin thì trừ một lượt, hết lượt thì từ chối.
 

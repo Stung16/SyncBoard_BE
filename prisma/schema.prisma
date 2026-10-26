@@ -1,0 +1,47 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+
+model Board {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  title     String    @default("Untitled")
+  // ownerId: thêm ở GĐ4 khi có bảng users
+  lastSeq   Int       @default(0) @map("last_seq")      // seq của op mới nhất (4.3)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")                // xóa mềm (6.2)
+  elements  Element[]                                   // BẮT BUỘC có quan hệ ngược, nếu không schema báo lỗi
+
+  @@map("boards")
+}
+
+model Element {
+  boardId   String   @map("board_id") @db.Uuid
+  id        String                                       // client tự sinh (UUID), để vẽ ngay không chờ server
+  type      String                                       // "freedraw", "rect", "ellipse", "diamond", "line", "arrow", "text", "sticky", "image", "frame", "stamp"
+  data      Json                                         // các trường riêng theo loại
+  zIndex    String   @map("z_index")                     // thứ tự lớp, xem 4.4
+  version   Int      @default(0)                         // tăng mỗi lần sửa
+  isDeleted Boolean  @default(false) @map("is_deleted")  // xóa mềm
+  locked    Boolean  @default(false)                     // 2.12
+  groupId   String?  @map("group_id")                    // 2.6
+  frameId   String?  @map("frame_id")                    // 5.7
+  updatedBy String   @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  board     Board    @relation(fields: [boardId], references: [id])
+
+  @@id([boardId, id])
+  @@map("elements")
+}
