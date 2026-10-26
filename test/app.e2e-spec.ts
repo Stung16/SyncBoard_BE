@@ -11,7 +11,7 @@ describe('REST (e2e)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
-    setupApp(app);
+    await setupApp(app);
     await app.init();
   });
 

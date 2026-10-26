@@ -17,5 +17,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  redis:
+    image: redis:8-alpine          # sharded Pub/Sub của adapter cần Redis >= 7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Không mount volume: Redis chỉ giữ dữ liệu tạm (pub/sub, presence, rate limit). Mất khi restart là chấp nhận được.
+
 volumes:
   pgdata:

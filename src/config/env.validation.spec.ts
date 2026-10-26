@@ -1,6 +1,10 @@
 import { envSchema } from './env.validation.js';
 
-const base = { DATABASE_URL: 'postgresql://x@localhost:5433/db', CORS_ORIGIN: 'http://localhost:5173' };
+const base = {
+  DATABASE_URL: 'postgresql://x@localhost:5433/db',
+  CORS_ORIGIN: 'http://localhost:5173',
+  REDIS_URL: 'redis://localhost:6379',
+};
 
 describe('envSchema', () => {
   it('ép PORT chuỗi thành số', () => {

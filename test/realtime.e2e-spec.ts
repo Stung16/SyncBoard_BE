@@ -13,7 +13,7 @@ describe('Socket.IO gateway (e2e)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
-    setupApp(app);
+    await setupApp(app);
     await app.listen(0); // init() chưa đủ: gateway chỉ nhận kết nối sau listen
     url = await app.getUrl();
   });

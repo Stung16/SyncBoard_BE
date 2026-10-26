@@ -4,7 +4,7 @@ import { setupApp } from './app.setup.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const config = setupApp(app);
+  const config = await setupApp(app);
   await app.listen(config.get('PORT', { infer: true }));
 }
 await bootstrap();
