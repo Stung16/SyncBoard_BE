@@ -1,7 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Toàn bộ database của SyncBoard. Nguồn: "SyncBoard — Phân tích thiết kế.md" mục 4.1 (bảng), 4.5 (index), 8.1 (vai trò).
+// Sửa file này -> `npx prisma migrate dev --name <tên>` -> `npx prisma generate`.
 
 generator client {
   provider = "prisma-client"
@@ -12,36 +10,345 @@ datasource db {
   provider = "postgresql"
 }
 
+// Vai trò trên một bảng (8.1). OWNER chỉ có trong board_members; share link chỉ cấp EDITOR/COMMENTER/VIEWER (kiểm ở code).
+enum BoardRole {
+  OWNER
+  EDITOR
+  COMMENTER
+  VIEWER
+}
 
+enum OAuthProvider {
+  GOOGLE
+}
+
+enum VerificationTokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+enum NotificationType {
+  MENTION // bị @ trong bình luận (5.2)
+  COMMENT_REPLY // có người trả lời bình luận của mình
+  BOARD_INVITATION // được mời vào bảng
+  ROLE_CHANGED // bị đổi vai trò trên một bảng
+}
+
+// ───────────────────────── Lõi bảng vẽ ─────────────────────────
 
 model Board {
   id        String    @id @default(uuid(7)) @db.Uuid
   title     String    @default("Untitled")
-  // ownerId: thêm ở GĐ4 khi có bảng users
-  lastSeq   Int       @default(0) @map("last_seq")      // seq của op mới nhất (4.3)
+  ownerId   String?   @map("owner_id") @db.Uuid // null = bảng tạo khi chưa có tài khoản (ai có link cũng sửa được)
+  lastSeq   Int       @default(0) @map("last_seq") // seq của op mới nhất (4.3)
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")                // xóa mềm (6.2)
-  elements  Element[]                                   // BẮT BUỘC có quan hệ ngược, nếu không schema báo lỗi
+  deletedAt DateTime? @map("deleted_at") // xóa mềm (6.2)
 
+  owner         User?             @relation("BoardOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  elements      Element[]
+  operations    Operation[]
+  assets        Asset[]
+  members       BoardMember[]
+  shareLinks    ShareLink[]
+  snapshots     Snapshot[]
+  comments      Comment[]
+  invitations   BoardInvitation[]
+  notifications Notification[]
+
+  @@index([ownerId])
   @@map("boards")
 }
 
 model Element {
   boardId   String   @map("board_id") @db.Uuid
-  id        String                                       // client tự sinh (UUID), để vẽ ngay không chờ server
-  type      String                                       // "freedraw", "rect", "ellipse", "diamond", "line", "arrow", "text", "sticky", "image", "frame", "stamp"
-  data      Json                                         // các trường riêng theo loại
-  zIndex    String   @map("z_index")                     // thứ tự lớp, xem 4.4
-  version   Int      @default(0)                         // tăng mỗi lần sửa
-  isDeleted Boolean  @default(false) @map("is_deleted")  // xóa mềm
-  locked    Boolean  @default(false)                     // 2.12
-  groupId   String?  @map("group_id")                    // 2.6
-  frameId   String?  @map("frame_id")                    // 5.7
-  updatedBy String   @map("updated_by")
+  id        String // client tự sinh (UUID), để vẽ ngay không chờ server
+  type      String // "freedraw", "rect", "ellipse", "diamond", "line", "arrow", "text", "sticky", "image", "frame", "stamp"
+  data      Json // các trường riêng theo loại (4.2)
+  zIndex    String   @map("z_index") // fractional index (4.4); cột dùng COLLATE "C", xem migration full_schema
+  version   Int      @default(0) // tăng mỗi lần sửa
+  isDeleted Boolean  @default(false) @map("is_deleted") // xóa mềm
+  locked    Boolean  @default(false) // 2.12
+  groupId   String?  @map("group_id") // 2.6
+  frameId   String?  @map("frame_id") // 5.7
+  updatedBy String   @map("updated_by") // actor: userId hoặc clientId của khách
   updatedAt DateTime @updatedAt @map("updated_at")
-  board     Board    @relation(fields: [boardId], references: [id])
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
 
   @@id([boardId, id])
+  // Index "chỉ element chưa xóa" (4.5) viết tay trong migration elements_active_idx.
   @@map("elements")
+}
+
+// Nhật ký thao tác (4.3). Chỉ ghi thêm, không sửa.
+model Operation {
+  boardId   String   @map("board_id") @db.Uuid
+  seq       Int // server cấp: 1, 2, 3... (Int vì BigInt không JSON.stringify được)
+  opId      String   @map("op_id") @db.Uuid // client sinh, chống gửi trùng
+  type      String // add, update, delete, restore, reorder, clear
+  elementId String?  @map("element_id")
+  payload   Json // op ĐÃ resolve (zIndex đã tính, deletedIds của clear...)
+  actor     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@id([boardId, seq])
+  @@unique([boardId, opId])
+  @@map("operations")
+}
+
+// Ảnh upload (2.10). File nằm ở storage, DB chỉ giữ metadata.
+model Asset {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  boardId    String   @map("board_id") @db.Uuid
+  storageKey String   @unique @map("storage_key") // đường dẫn/khóa trong storage, server tự sinh
+  mimeType   String   @map("mime_type")
+  sizeBytes  Int      @map("size_bytes") // tối đa 10 MB nên Int đủ
+  width      Int? // đọc từ file lúc upload; client cần để đặt khung ảnh trước khi tải xong
+  height     Int?
+  checksum   String // sha256 nội dung: phát hiện file trùng, kiểm tra toàn vẹn khi chuyển storage
+  uploadedBy String   @map("uploaded_by") // actor như elements.updated_by
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([boardId])
+  @@index([boardId, checksum])
+  @@map("assets")
+}
+
+// ───────────────────────── Tài khoản & quyền (GĐ4) ─────────────────────────
+
+// Quy ước bảo mật: mọi token "đăng nhập được" (refresh, xác minh email, đặt lại mật khẩu, lời mời)
+// chỉ lưu sha256 của token trong cột token_hash. Lộ DB cũng không dùng được token. Token gốc chỉ gửi cho người dùng một lần.
+
+model User {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  email           String    @unique // luôn lưu chữ thường (normalize ở code)
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  displayName     String    @map("display_name")
+  avatarUrl       String?   @map("avatar_url")
+  passwordHash    String?   @map("password_hash") // argon2id; null nếu chỉ đăng nhập bằng OAuth
+  preferences     Json      @default("{}") // { theme: "dark", ... } (3.6, 3.7)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at") // xóa mềm tài khoản; email giữ unique nên đăng ký lại phải khôi phục
+
+  oauthAccounts      OAuthAccount[]
+  sessions           Session[]
+  verificationTokens VerificationToken[]
+  ownedBoards        Board[]             @relation("BoardOwner")
+  memberships        BoardMember[]
+  shareLinks         ShareLink[]
+  invitationsSent    BoardInvitation[]
+  comments           Comment[]
+  notifications      Notification[]      @relation("NotificationRecipient")
+  notificationsMade  Notification[]      @relation("NotificationActor")
+  templates          Template[]
+
+  @@map("users")
+}
+
+// Một user có thể liên kết nhiều nhà cung cấp đăng nhập (Google, sau này GitHub...).
+model OAuthAccount {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  userId            String        @map("user_id") @db.Uuid
+  provider          OAuthProvider
+  providerAccountId String        @map("provider_account_id") // "sub" của Google
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+// Một phiên đăng nhập = một chuỗi refresh token xoay vòng.
+// Mỗi lần refresh: token cũ bị đánh dấu revoked + replacedById, token mới cùng familyId.
+// Token đã revoked mà vẫn bị dùng lại => bị đánh cắp => thu hồi cả family.
+model Session {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  familyId     String    @map("family_id") @db.Uuid
+  tokenHash    String    @unique @map("token_hash")
+  replacedById String?   @map("replaced_by_id") @db.Uuid
+  userAgent    String?   @map("user_agent") // cho trang "các thiết bị đang đăng nhập"
+  ip           String?
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt]) // job dọn session hết hạn
+  @@map("sessions")
+}
+
+// Token dùng một lần gửi qua email.
+model VerificationToken {
+  id        String                @id @default(uuid(7)) @db.Uuid
+  userId    String                @map("user_id") @db.Uuid
+  type      VerificationTokenType
+  tokenHash String                @unique @map("token_hash")
+  expiresAt DateTime              @map("expires_at")
+  usedAt    DateTime?             @map("used_at")
+  createdAt DateTime              @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("verification_tokens")
+}
+
+model BoardMember {
+  boardId   String    @map("board_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  role      BoardRole
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([boardId, userId])
+  @@index([userId]) // trang "bảng của tôi" (4.5)
+  @@map("board_members")
+}
+
+model ShareLink {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  boardId   String    @map("board_id") @db.Uuid
+  token     String    @unique // ngẫu nhiên, crypto.randomBytes (4.5). Lưu bản gốc (không băm) vì chủ bảng cần xem/copy lại link; an toàn nhờ revokedAt + expiresAt
+  role      BoardRole
+  createdBy String    @map("created_by") @db.Uuid
+  expiresAt DateTime? @map("expires_at")
+  revokedAt DateTime? @map("revoked_at") // thu hồi = đặt giá trị này (6.4)
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  board   Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  creator User  @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@index([boardId])
+  @@map("share_links")
+}
+
+// Mời người theo email (6.3). Người nhận có thể chưa có tài khoản: chấp nhận xong mới tạo board_members.
+model BoardInvitation {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  boardId     String    @map("board_id") @db.Uuid
+  email       String // chữ thường
+  role        BoardRole
+  tokenHash   String    @unique @map("token_hash")
+  invitedById String    @map("invited_by_id") @db.Uuid
+  expiresAt   DateTime  @map("expires_at")
+  acceptedAt  DateTime? @map("accepted_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  board     Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  invitedBy User  @relation(fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([boardId])
+  @@index([email])
+  @@map("board_invitations")
+}
+
+// ───────────────────────── Lịch sử (GĐ4) ─────────────────────────
+
+model Snapshot {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  boardId   String   @map("board_id") @db.Uuid
+  seq       Int // last_seq lúc chụp
+  data      Json // toàn bộ element tại thời điểm đó
+  label     String? // ví dụ "Trước khi khôi phục"
+  createdAt DateTime @default(now()) @map("created_at")
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, seq]) // job chạy trùng (2 process) cũng không chụp 2 lần
+  @@map("snapshots")
+}
+
+// ───────────────────────── Cộng tác (GĐ5) ─────────────────────────
+
+model Comment {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  boardId    String    @map("board_id") @db.Uuid
+  parentId   String?   @map("parent_id") @db.Uuid // trả lời = comment có parent
+  elementId  String?   @map("element_id") // gắn vào element (không FK: element có thể bị xóa mềm)
+  x          Float? // hoặc gắn vào tọa độ bảng
+  y          Float?
+  authorId   String    @map("author_id") @db.Uuid
+  body       String
+  resolvedAt DateTime? @map("resolved_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  board         Board          @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  author        User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent        Comment?       @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies       Comment[]      @relation("CommentReplies")
+  notifications Notification[]
+
+  @@index([boardId])
+  @@map("comments")
+}
+
+// Thông báo dùng chung cho nhiều loại sự kiện; nội dung hiển thị nằm trong data.
+model Notification {
+  id        String           @id @default(uuid(7)) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid // người nhận
+  type      NotificationType
+  actorId   String?          @map("actor_id") @db.Uuid // ai gây ra (null = hệ thống)
+  boardId   String?          @map("board_id") @db.Uuid
+  commentId String?          @map("comment_id") @db.Uuid
+  data      Json             @default("{}") // { boardTitle, excerpt, ... } chụp lúc tạo, khỏi join khi hiển thị
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user    User     @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor   User?    @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  board   Board?   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  comment Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt]) // "thông báo chưa đọc" (4.5)
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model Template {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String
+  description String?
+  data        Json // { formatVersion, elements: [...] } như file export (5.9, 7.2)
+  isPublic    Boolean  @default(false) @map("is_public") // true = template hệ thống/cộng đồng
+  createdById String?  @map("created_by_id") @db.Uuid // null = template có sẵn của hệ thống
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([createdById])
+  @@map("templates")
+}
+
+// ───────────────────────── Vận hành ─────────────────────────
+
+// Ai làm gì, lúc nào: xóa bảng, đổi quyền, thu hồi link, khôi phục phiên bản, đăng nhập...
+// Không có khóa ngoại: log phải còn sau khi user/bảng bị xóa hẳn.
+model AuditLog {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  actorId   String?  @map("actor_id") // userId, clientId của khách, hoặc null = hệ thống
+  boardId   String?  @map("board_id") @db.Uuid
+  action    String // "board.delete", "member.role_change", "share_link.revoke", "snapshot.restore", "auth.login"...
+  metadata  Json     @default("{}")
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([boardId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
 }
