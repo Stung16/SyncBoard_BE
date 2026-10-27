@@ -10,3 +10,6 @@ export type OAuthProfile = {
   displayName: string;
   avatarUrl?: string;
 };
+
+export type RequestMeta = { ip?: string; userAgent?: string }; // lưu vào sessions cho trang "thiết bị đang đăng nhập"
+export type TokenPair = { accessToken: string; refreshToken: string };

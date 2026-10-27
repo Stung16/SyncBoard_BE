@@ -1,10 +1,10 @@
-import { INestApplication, StandardSchemaValidationPipe } from '@nestjs/common';
+import { BadRequestException, INestApplication, StandardSchemaValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HttpAdapterHost } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
-import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.js';
+import { AllExceptionsFilter, type ApiError } from './common/filters/all-exceptions.filter.js';
+import { API_PREFIX } from './config/api-prefix.js';
 import { requestLogger } from './common/middleware/request-logger.js';
 import type { Env } from './config/env.validation.js';
 import { SocketIoAdapter } from './infra/socket/socket-io.adapter.js';
@@ -18,10 +18,25 @@ export async function setupApp(app: INestApplication) {
   app.enableCors({ origin: corsOrigin, credentials: true }); // credentials: gửi kèm cookie refresh token
   app.use(cookieParser());
   app.use(requestLogger);
-  app.setGlobalPrefix('api', { exclude: ['health'] }); // /health giữ ngắn cho load balancer
+  app.setGlobalPrefix(API_PREFIX, { exclude: ['health'] }); // /health giữ ngắn cho load balancer
 
-  app.useGlobalPipes(new StandardSchemaValidationPipe());
-  app.useGlobalFilters(new PrismaExceptionFilter(app.get(HttpAdapterHost).httpAdapter));
+  // Mỗi issue Zod thành một lỗi có `field` riêng (mặc định Nest chỉ trả mảng chuỗi "password: Too small...").
+  // Pipe này chạy cho cả HTTP lẫn Socket.IO, nên client WS cũng nhận cùng dạng { errors }.
+  app.useGlobalPipes(
+    new StandardSchemaValidationPipe({
+      exceptionFactory: (issues) =>
+        new BadRequestException({
+          errors: issues.map(
+            (i): ApiError => ({
+              code: 'VALIDATION_ERROR',
+              message: i.message,
+              field: i.path?.map((p) => String(typeof p === 'object' ? p.key : p)).join('.') || null, // "items.0.name"
+            }),
+          ),
+        }),
+    }),
+  );
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   const adapter = new SocketIoAdapter(app, corsOrigin, config.get('REDIS_URL', { infer: true }));
   await adapter.connectToRedis();
@@ -29,7 +44,7 @@ export async function setupApp(app: INestApplication) {
 
   if (config.get('NODE_ENV', { infer: true }) !== 'production') {
     const doc = new DocumentBuilder().setTitle('SyncBoard API').setVersion('1').addBearerAuth().build();
-    SwaggerModule.setup('api/docs', app, () => SwaggerModule.createDocument(app, doc)); // /api/docs
+    SwaggerModule.setup(`${API_PREFIX}/docs`, app, () => SwaggerModule.createDocument(app, doc)); // /api/v1/docs
   }
 
   app.enableShutdownHooks();

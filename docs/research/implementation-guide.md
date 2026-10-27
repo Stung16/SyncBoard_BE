@@ -617,7 +617,7 @@ File: `modules/asset/{asset.module, asset.controller, asset.service}.ts`, `infra
 
 **Thư viện:** `FileInterceptor` (`@nestjs/platform-express`), `@UploadedFile()`, `ParseFilePipe` với `MaxFileSizeValidator` và `FileTypeValidator` [S6], `StreamableFile` [S7].
 
-### 5.1 Upload: `POST /api/boards/:id/assets`
+### 5.1 Upload: `POST /api/v1/boards/:id/assets`
 
 ```ts
 @Post(':id/assets')
@@ -637,7 +637,7 @@ upload(@Param('id', ParseUUIDPipe) boardId: string,
    - Đừng bật `skipMagicNumbersValidation` hay `fallbackToMimetype`.
 4. Sinh `assetId = crypto.randomUUID()`. **Server** chọn đuôi file từ mime đã phát hiện (`image/png` thành `.png`). `storageKey = ${boardId}/${assetId}.png`. Không dùng `file.originalname`, vì multer ghi rõ "`file.originalname` is always client-supplied and should be treated as untrusted" [S65]. OWASP cũng khuyên đặt tên ngẫu nhiên bằng UUID [S58].
 5. `await storage.put(storageKey, file.buffer, mime)`, rồi tạo dòng `assets`. Nếu tạo dòng lỗi thì xóa file vừa ghi.
-6. Trả `{ assetId, url: /api/assets/${assetId} }`.
+6. Trả `{ assetId, url: /api/v1/assets/${assetId} }`.
 
 ### 5.2 Storage interface + ổ đĩa
 
@@ -653,7 +653,7 @@ export interface Storage { put(key: string, data: Buffer, contentType: string): 
 - Tạo thư mục bằng `mkdir(..., { recursive: true })`.
 - Thư mục upload nằm **ngoài** thư mục được serve static. OWASP: "store them outside of the webroot" [S58].
 
-### 5.3 Serve: `GET /api/assets/:id`
+### 5.3 Serve: `GET /api/v1/assets/:id`
 
 1. `ParseUUIDPipe`. Đọc dòng `assets`. GĐ4: kiểm tra người xem có quyền `view` trên `asset.boardId`.
 2. `return new StreamableFile(await storage.read(asset.storageKey), { type: asset.mimeType, length: asset.sizeBytes })` [S7].
@@ -811,7 +811,7 @@ File: `modules/snapshot/{snapshot.module, snapshot.controller, snapshot.service,
 4. `snapshot.create({ boardId, seq, data: { formatVersion: 1, elements } })`. Dùng lại định dạng export của 7.2.
 5. Một bảng lỗi thì log rồi chuyển sang bảng tiếp. Đừng để một bảng làm hỏng cả vòng.
 
-### 8.2 Khôi phục: `POST /api/boards/:id/snapshots/:sid/restore`
+### 8.2 Khôi phục: `POST /api/v1/boards/:id/snapshots/:sid/restore`
 
 1. Quyền `clearOrRestoreVersion`.
 2. Trong `BoardLocks.run(boardId)`:
@@ -851,7 +851,7 @@ File: `modules/snapshot/{snapshot.module, snapshot.controller, snapshot.service,
 
 File: `modules/comment/{comment.module, comment.controller, comment.service, dto/}`.
 
-1. `POST /api/boards/:id/comments`:
+1. `POST /api/v1/boards/:id/comments`:
    - Quyền `comment`. `body` tối đa N ký tự.
    - Gắn vào `elementId` **hoặc** `(x, y)` hữu hạn. `parentId` (nếu có) phải thuộc cùng bảng.
 2. Mention:
@@ -931,7 +931,7 @@ Theo cột "Cần từ giai đoạn" ở mục 4.1 của spec. Chưa qua bài "x
 - [ ] `board/dto/element.dto.ts` + `op.dto.ts` (Zod) + spec gọi thẳng `safeParse`. *Xong khi:* mỗi loại op hợp lệ đều qua; khóa lạ, `type` lạ, 101 op, 5.001 điểm, `clear` kèm op khác, `restore` thiếu hoặc thừa trường, `NaN`/`Infinity` đều bị từ chối.
 - [ ] `domain/apply-op.ts` với `add` / `update` / `delete` / `clear` + spec (merge nông, NaN, `__proto__`, deleted). *Xong khi:* mọi case ở 1.1 xanh và không case nào mutate input.
 - [ ] `board-locks.ts` + spec. *Xong khi:* 5 test ở 2.1 xanh, `size() === 0`.
-- [ ] `BoardController` `POST /api/boards`, `BoardService.submitOps` (elements + `last_seq`, chưa có bảng `operations`). *Xong khi:* 20 lô song song cho `seq` liên tục và version đúng.
+- [ ] `BoardController` `POST /api/v1/boards`, `BoardService.submitOps` (elements + `last_seq`, chưa có bảng `operations`). *Xong khi:* 20 lô song song cho `seq` liên tục và version đúng.
 - [ ] `SocketEmitter`, gateway `JoinBoard` / `SubmitOps` / `handleDisconnect`, `PresenceTracker` + spec. *Xong khi:* e2e 2 client, A vẽ thì B nhận `OpsApplied`. F5 thấy lại nội dung. Mở 2 tab rồi đóng 1 tab: không có `UserLeft`.
 
 **GĐ2: Công cụ vẽ + ảnh**

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { API_PREFIX } from './api-prefix.js';
 
 export const envSchema = z.object({
   // z.object, KHÔNG phải z.strictObject (xem bẫy)
@@ -18,7 +19,7 @@ export const envSchema = z.object({
   // Google OAuth: tùy chọn. Không đặt GOOGLE_CLIENT_ID thì tắt đăng nhập Google (route trả 404).
   GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
-  GOOGLE_CALLBACK_URL: z.url().default('http://localhost:3000/api/auth/google/callback'),
+  GOOGLE_CALLBACK_URL: z.url().default(`http://localhost:3000/${API_PREFIX}/auth/google/callback`), // phải trùng Authorized redirect URI bên Google
 }).refine((e) => !e.GOOGLE_CLIENT_ID || !!e.GOOGLE_CLIENT_SECRET, {
   message: 'GOOGLE_CLIENT_SECRET is required when GOOGLE_CLIENT_ID is set',
   path: ['GOOGLE_CLIENT_SECRET'],

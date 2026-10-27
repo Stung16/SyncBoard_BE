@@ -37,8 +37,8 @@ describe('REST (e2e)', () => {
     expect(bad.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('route nghiệp vụ nằm dưới /api', async () => {
+  it('route nghiệp vụ nằm dưới /api/v1', async () => {
     await request(app.getHttpServer()).get('/boards').expect(404);
-    await request(app.getHttpServer()).get('/api/docs-json').expect(200); // Swagger (không bật khi production)
+    await request(app.getHttpServer()).get('/api/v1/docs-json').expect(200); // Swagger (không bật khi production)
   });
 });

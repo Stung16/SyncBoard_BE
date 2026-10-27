@@ -260,7 +260,7 @@ Mỗi tính năng dưới đây được quy về: đi qua REST hay Socket.IO, d
 
 **UC 1.1 — Tạo bảng**
 
-1. Client gọi `POST /api/boards` (REST, không phải Socket.IO, vì đây là yêu cầu một lần, cần kết quả trả về).
+1. Client gọi `POST /api/v1/boards` (REST, không phải Socket.IO, vì đây là yêu cầu một lần, cần kết quả trả về).
 2. Server sinh `boardId` (UUID, `crypto.randomUUID()`), tạo dòng `boards`, trả về `{ boardId }`.
 3. Client chuyển sang `/b/{boardId}`. Link này chính là link chia sẻ.
 
@@ -319,7 +319,7 @@ Cấp 2 gần như không cần thêm logic server mới. Mọi tính năng đ�
 
 **UC 2.10 — Chèn ảnh**
 
-1. Client gửi file bằng `POST /api/boards/{id}/assets` (REST, multipart).
+1. Client gửi file bằng `POST /api/v1/boards/{id}/assets` (REST, multipart).
 2. Server nhận file bằng `FileInterceptor` của NestJS, kiểm tra bằng `ParseFilePipe` + `MaxFileSizeValidator` / `FileTypeValidator`: kích thước (ví dụ tối đa 10 MB) và loại file (chỉ png, jpeg, gif, webp), lưu file vào ổ đĩa (sau này là S3 hoặc MinIO), tạo dòng `assets`, trả về `assetId` và URL.
 3. Client gửi op `add` với type `image` và `assetId`. Op chỉ chứa id, không chứa ảnh.
 
@@ -412,7 +412,7 @@ Cái bẫy: nếu server gửi "còn 59 giây, còn 58 giây..." mỗi giây, c�
 | Mã | Cách xử lý | Bảng DB |
 | --- | --- | --- |
 | 6.1 | `@nestjs/passport` + `@nestjs/jwt`: tự làm đăng ký/đăng nhập (băm mật khẩu bằng argon2 hoặc bcrypt) trả về JWT (một chuỗi token chứng minh bạn là ai, gửi kèm mỗi request). Google: dùng strategy `passport-google-oauth20` | `users` |
-| 6.2 | REST: `GET /api/boards?search=`, `PATCH /api/boards/{id}` (đổi tên), `DELETE` (đặt `deleted_at`, không xóa thật) | `boards`, `board_members` |
+| 6.2 | REST: `GET /api/v1/boards?search=`, `PATCH /api/v1/boards/{id}` (đổi tên), `DELETE` (đặt `deleted_at`, không xóa thật) | `boards`, `board_members` |
 | 6.3 | Xem **phần 8** | `board_members` |
 | 6.4 | Link chia sẻ = token ngẫu nhiên gắn với một vai trò. Vào phòng bằng `?token=...`. Thu hồi = đặt `revoked_at` và ngắt kết nối những ai đã vào bằng token đó | `share_links` |
 | 6.5 | Xem luồng bên dưới | `snapshots`, `operations` |
@@ -428,7 +428,7 @@ Với thiết kế này, mỗi op đã được ghi thẳng vào `elements` nên
 
 **UC 6.5 — Xem và khôi phục phiên bản cũ**
 
-1. `GET /api/boards/{id}/snapshots` trả danh sách thời điểm.
+1. `GET /api/v1/boards/{id}/snapshots` trả danh sách thời điểm.
 2. Xem một bản: trả JSON của snapshot đó, client vẽ ở chế độ chỉ đọc.
 3. Khôi phục: server thay toàn bộ `elements` bằng nội dung snapshot trong một transaction, ghi một op `restore_snapshot` vào nhật ký, rồi gửi `BoardReset` cho cả phòng. Mọi client tải lại bảng.
 
@@ -439,7 +439,7 @@ Trước khi khôi phục, server tự chụp một snapshot của trạng thái
 | Mã | Ai làm | Cách xử lý |
 | --- | --- | --- |
 | 7.1 | Client | Vẽ canvas ra ảnh PNG, hoặc dựng SVG từ danh sách element |
-| 7.2 | Server | Xuất: `GET /api/boards/{id}/export` trả `{ formatVersion: 1, elements: [...] }`. Nhập: `POST`, server kiểm tra từng element như op thường, gán id mới, tạo op `add` |
+| 7.2 | Server | Xuất: `GET /api/v1/boards/{id}/export` trả `{ formatVersion: 1, elements: [...] }`. Nhập: `POST`, server kiểm tra từng element như op thường, gán id mới, tạo op `add` |
 | 7.3 | Client | Thư viện tạo PDF phía trình duyệt. Có thể làm phía server bằng `pdfkit` hoặc Puppeteer, nhưng không cần |
 | 7.4 | Client | Dán chữ thành element text. Dán ảnh thì đi đúng luồng upload của 2.10 |
 

@@ -43,11 +43,11 @@ describe('Socket.IO gateway (e2e)', () => {
     expect(ack).toEqual({ ok: true });
   });
 
-  it('JoinBoard sai -> exception có message, không dội payload', async () => {
+  it('JoinBoard sai -> exception { errors } cùng dạng HTTP, không dội payload', async () => {
     const err = new Promise<Record<string, unknown>>((r) => client.once('exception', r));
     client.emit('JoinBoard', { boardId: 'nope', displayName: 'An', clientId: randomUUID(), sneaky: 1 });
     const e = await err;
-    expect(e['message']).toEqual(expect.arrayContaining([expect.stringContaining('boardId')]));
+    expect(e['errors']).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'VALIDATION_ERROR', field: 'boardId' })]));
     expect(JSON.stringify(e)).not.toContain('nope');
   });
 });
