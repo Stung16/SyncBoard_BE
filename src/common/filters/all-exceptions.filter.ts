@@ -55,7 +55,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const message = Array.isArray(raw) ? raw.join('; ') : raw; // new BadRequestException(['a', 'b']) -> message là mảng
       return { status, errors: [{ code: STATUS_CODE[status] ?? 'HTTP_ERROR', message, field: null }] };
     }
-
     // Lỗi lạ (bug, mất kết nối DB, Prisma chưa map): log đủ ở server, client chỉ thấy câu chung
     this.logger.error(e instanceof Error ? e.stack : String(e));
     return { status: 500, errors: [{ code: 'INTERNAL_ERROR', message: 'Lỗi hệ thống', field: null }] };

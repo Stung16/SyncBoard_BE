@@ -39,12 +39,12 @@ export class AuthService {
         const verifyToken = await this.verification.issue(user.id, 'EMAIL_VERIFY', EMAIL_VERIFY_TTL_MS, tx);
         return { user, verifyToken };
       })
-      .catch((e: unknown) => {
-        // Bắt lỗi unique thay vì findByEmail trước: 2 request cùng lúc đều thấy "chưa có" rồi cùng create, chỉ constraint mới chặn được.
-        // users chỉ có 1 unique là email; token_hash là 32 byte ngẫu nhiên, không thể trùng -> P2002 ở đây = email trùng.
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new AppError('EMAIL_TAKEN', 'email');
-        throw e;
-      });
+      // .catch((e: unknown) => {
+      //   // Bắt lỗi unique thay vì findByEmail trước: 2 request cùng lúc đều thấy "chưa có" rồi cùng create, chỉ constraint mới chặn được.
+      //   // users chỉ có 1 unique là email; token_hash là 32 byte ngẫu nhiên, không thể trùng -> P2002 ở đây = email trùng.
+      //   if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new AppError('EMAIL_TAKEN', 'email');
+      //   throw e;
+      // });
 
     // Link trỏ về frontend (frontend gọi POST /verify-email): trình quét email tự bấm link GET sẽ dùng mất token.
     const link = `${this.config.get('APP_URL', { infer: true })}/verify-email?token=${verifyToken}`;
