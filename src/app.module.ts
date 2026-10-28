@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { envSchema } from './config/env.validation.js';
 import { PrismaModule } from './infra/database/prisma.module.js';
@@ -16,6 +17,7 @@ import { UserModule } from './modules/user/user.module.js';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validationSchema: envSchema }),
+    EventEmitterModule.forRoot(), // global: inject EventEmitter2 ở đâu cũng được; quét mọi @OnEvent khi app khởi động
     PrismaModule,
     RedisModule,
     SocketEmitterModule,

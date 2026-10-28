@@ -1,21 +1,27 @@
 import { verify } from 'argon2';
 import { Prisma } from '../../../generated/prisma/client.js';
+import { USER_REGISTERED } from '../events/user-registered.event.js';
 import { AuthService } from './auth.service.js';
 
 describe('AuthService.register', () => {
   const tx = { tx: true };
   const deps = {
     prisma: { $transaction: vi.fn((fn: (t: unknown) => unknown) => fn(tx)) },
-    users: { create: vi.fn(async (d: { email: string; passwordHash: string }, _tx?: unknown) => ({ id: 'u1', email: d.email })) },
+    users: {
+      create: vi.fn(async (d: { email: string; passwordHash: string; displayName: string }, _tx?: unknown) => ({
+        id: 'u1',
+        email: d.email,
+        displayName: d.displayName,
+      })),
+    },
     sessions: { create: vi.fn(async () => 'refresh-token') },
     verification: { issue: vi.fn(async () => 'verify-token') },
-    mail: { send: vi.fn(async () => {}) },
+    events: { emit: vi.fn() },
     jwt: { signAsync: vi.fn(async () => 'access-token') },
-    config: { get: vi.fn(() => 'http://app.test') },
   };
   const service = new AuthService(
     deps.prisma as never, deps.users as never, deps.sessions as never, deps.verification as never,
-    deps.mail as never, deps.jwt as never, deps.config as never,
+    deps.events as never, deps.jwt as never,
   );
   const dto = { email: 'an@mail.com', password: 'secret-pass', displayName: 'An' };
 
@@ -35,23 +41,25 @@ describe('AuthService.register', () => {
     expect(deps.verification.issue).toHaveBeenCalledWith('u1', 'EMAIL_VERIFY', expect.any(Number), tx);
   });
 
-  it('gửi link xác minh trỏ về frontend, kèm token', async () => {
+  it('phát USER_REGISTERED kèm token gốc, SAU khi transaction xong', async () => {
     await service.register(dto, {});
-    expect(deps.mail.send).toHaveBeenCalledWith('an@mail.com', expect.any(String), 'http://app.test/verify-email?token=verify-token');
+    expect(deps.events.emit).toHaveBeenCalledWith(USER_REGISTERED, {
+      userId: 'u1',
+      email: 'an@mail.com',
+      displayName: 'An',
+      verifyToken: 'verify-token',
+    });
+    expect(deps.events.emit.mock.invocationCallOrder[0]).toBeGreaterThan(deps.prisma.$transaction.mock.invocationCallOrder[0]!);
   });
 
-  it('email trùng (P2002) -> AppError EMAIL_TAKEN, field email; lỗi khác giữ nguyên', async () => {
+  it('email trùng (P2002) -> AppError EMAIL_TAKEN, field email, KHÔNG phát event; lỗi khác giữ nguyên', async () => {
     const p2002 = new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' });
     deps.users.create.mockRejectedValueOnce(p2002);
     await expect(service.register(dto, {})).rejects.toMatchObject({ code: 'EMAIL_TAKEN', field: 'email', status: 409 });
+    expect(deps.events.emit).not.toHaveBeenCalled();
 
     const other = new Error('db down');
     deps.users.create.mockRejectedValueOnce(other);
     await expect(service.register(dto, {})).rejects.toBe(other);
-  });
-
-  it('gửi mail lỗi vẫn đăng ký thành công', async () => {
-    deps.mail.send.mockRejectedValueOnce(new Error('SMTP down'));
-    await expect(service.register(dto, {})).resolves.toMatchObject({ accessToken: 'access-token', refreshToken: 'refresh-token' });
   });
 });

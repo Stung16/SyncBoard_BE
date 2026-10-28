@@ -60,7 +60,8 @@ describe('Auth (e2e)', () => {
       const session = await prisma.session.findFirstOrThrow({ where: { userId } });
       expect(session.tokenHash).toBe(sha256(refresh));
 
-      const link = send.mock.calls.find((c) => c[0] === email)![2];
+      // Mail gửi qua event (async) nên có thể tới SAU response: chờ tới khi listener chạy xong
+      const link = await vi.waitFor(() => send.mock.calls.find((c) => c[0] === email)![2]);
       const verifyToken = new URL(link).searchParams.get('token')!;
       const vt = await prisma.verificationToken.findFirstOrThrow({ where: { userId } });
       expect(vt).toMatchObject({ type: 'EMAIL_VERIFY', tokenHash: sha256(verifyToken), usedAt: null });

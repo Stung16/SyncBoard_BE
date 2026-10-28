@@ -8,6 +8,7 @@ import { UserModule } from '../user/user.module.js';
 import { AuthController } from './controllers/auth.controller.js';
 import { MeController } from './controllers/me.controller.js';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard.js';
+import { VerificationMailListener } from './listeners/verification-mail.listener.js';
 import { SessionRepository } from './repositories/session.repository.js';
 import { VerificationTokenRepository } from './repositories/verification-token.repository.js';
 import { AuthService } from './services/auth.service.js';
@@ -36,6 +37,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
     VerificationService,
     SessionRepository,
     VerificationTokenRepository,
+    VerificationMailListener, // @OnEvent chỉ có hiệu lực khi class là provider của một module
     // Strategy tự đăng ký với Passport khi được tạo. Thêm cách đăng nhập mới = thêm một strategy ở đây.
     JwtStrategy,
     {

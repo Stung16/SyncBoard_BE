@@ -196,7 +196,11 @@ return { accessToken, refreshToken };
 1. `passwordHash = await hash(dto.password)` (argon2).
 2. `user = await users.create({ email, passwordHash, displayName })`. Email trùng → Prisma ném P2002 → `.catch` bên ngoài `$transaction` đổi thành `throw new AppError('EMAIL_TAKEN', 'email')` → 409 `{ errors: [{ code: 'EMAIL_TAKEN', field: 'email', ... }] }`. Bắt P2002 thay vì `findByEmail` trước, vì hai request đến cùng lúc đều thấy "chưa có"; chỉ unique constraint mới chặn được.
 3. `token = await verification.issue(user.id, 'EMAIL_VERIFY', 24h)`.
-4. `await mail.send(user.email, 'Xác minh email', \`${APP_URL}/verify-email?token=${token}\`)`.
+4. Sau khi transaction commit: `events.emit(USER_REGISTERED, { userId, email, displayName, verifyToken })`.
+   - `VerificationMailListener` (`auth/listeners/`, `@OnEvent(USER_REGISTERED, { async: true })`) dựng link `${APP_URL}/verify-email?token=...` rồi gọi `mail.send`.
+   - AuthService không biết gì về mail. Muốn thêm việc khi có user mới (audit, thông báo) thì thêm listener, không sửa `register`.
+   - Phát **sau** commit, không phát trong transaction: nếu rollback thì mail đã lỡ gửi.
+   - Lỗi mail chỉ ghi log. Event chỉ nằm trong RAM: process chết đúng lúc thì mất mail, người dùng dùng `resend-verification`.
 5. `return { ...await issueTokens(user.id, meta), user }` — `user` không được có `passwordHash`.
 
 **Vì sao đăng nhập luôn sau khi đăng ký:** trải nghiệm tốt hơn; tính năng nào cần email đã xác minh thì kiểm `emailVerifiedAt` riêng.

@@ -1,7 +1,20 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Public } from '../../../common/decorators/public.decorator.js';
 import { registerSchema, type RegisterDto } from '../dto/register.dto.js';
+import {
+  verifyEmailSchema,
+  type VerifyEmailDto,
+} from '../dto/verify-email.dto.js';
 import { GoogleOAuthGuard } from '../guards/google-oauth.guard.js';
 import { AuthService } from '../services/auth.service.js';
 import { SessionService } from '../services/session.service.js';
@@ -9,7 +22,10 @@ import type { OAuthProfile, RequestMeta } from '../types/auth.types.js';
 import { REFRESH_COOKIE, refreshCookieOptions } from '../utils/refresh-cookie.js';
 
 // ip + user-agent lưu vào sessions cho trang "thiết bị đang đăng nhập"
-const metaOf = (req: Request): RequestMeta => ({ ip: req.ip, userAgent: req.get('user-agent') });
+const metaOf = (req: Request): RequestMeta => ({
+  ip: req.ip,
+  userAgent: req.get('user-agent'),
+});
 
 @Controller('auth')
 export class AuthController {
@@ -18,21 +34,39 @@ export class AuthController {
     private readonly sessions: SessionService,
   ) {}
 
-  // Access token trả trong body (frontend giữ trong bộ nhớ, gắn header Authorization).
-  // Refresh token sống lâu hơn -> cookie httpOnly, JavaScript không đọc được.
   @Public()
   @Post('register')
+  @HttpCode(201)
   async register(
     @Body({ schema: registerSchema }) dto: RegisterDto,
     @Req() req: Request,
-    @Res({ passthrough: true }) res: Response, // passthrough: tự đặt cookie nhưng vẫn để Nest trả JSON
   ) {
-    const { accessToken, refreshToken, user } = await this.auth.register(dto, metaOf(req));
-    res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions(this.sessions.refreshTtlMs));
-    return { accessToken, user };
+    const { user } = await this.auth.register(dto);
+    // res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions(this.sessions.refreshTtlMs));
+    return { user, requiresEmailVerification: true };
   }
 
   // TODO(bạn code): login, refresh, logout, verify-email, forgot/reset-password
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(200) // POST mặc định 201; xác minh không tạo tài nguyên mới
+  async verifyEmail(
+    @Body({ schema: verifyEmailSchema }) { token }: VerifyEmailDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, refreshToken, user } = await this.auth.verifyEmail(
+      token,
+      metaOf(req),
+    );
+    res.cookie(
+      REFRESH_COOKIE,
+      refreshToken,
+      refreshCookieOptions(this.sessions.refreshTtlMs),
+    );
+    return { accessToken, user };
+  }
 
   @Public()
   @UseGuards(GoogleOAuthGuard)

@@ -15,7 +15,18 @@ export class UserService {
     return this.users.findByEmail(this.normalizeEmail(email));
   }
 
-  create(data: { email: string; passwordHash: string | null; displayName: string }, db?: Prisma.TransactionClient) {
-    return this.users.create({ ...data, email: this.normalizeEmail(data.email) }, db);
+  create(
+    data: { email: string; passwordHash: string | null; displayName: string },
+    db?: Prisma.TransactionClient,
+  ) {
+    return this.users.create(
+      { ...data, email: this.normalizeEmail(data.email) },
+      db,
+    );
+  }
+
+  // UserService
+  markEmailVerified(id: string, db?: Prisma.TransactionClient) {
+    return this.users.markEmailVerified(id, db);
   }
 }

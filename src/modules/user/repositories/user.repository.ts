@@ -18,4 +18,12 @@ export class UserRepository {
   create(data: { email: string; passwordHash: string | null; displayName: string }, db: Db = this.prisma) {
     return db.user.create({ data, omit: { passwordHash: true } });
   }
+
+    markEmailVerified(id: string, db: Db = this.prisma) {
+    return db.user.update({
+      where: { id ,deletedAt: null},
+      data: { emailVerifiedAt: new Date() },
+      omit: { passwordHash: true },
+    });
+  }
 }
