@@ -23,6 +23,14 @@ export const ERRORS = {
     status: HttpStatus.TOO_MANY_REQUESTS,
     message: 'Bạn thao tác quá nhanh, vui lòng thử lại sau',
   },
+  USER_NOT_FOUND: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'Tài khoản không tồn tại',
+  },
+  INVALID_RESET_TOKEN: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn',
+  },
   INVALID_REFRESH_TOKEN: {
     status: HttpStatus.UNAUTHORIZED,
     message: 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại',

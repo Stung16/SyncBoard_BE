@@ -69,6 +69,10 @@ export class SessionService {
     await this.sessions.revokeByTokenHash(sha256(token));
   }
 
+  async revokeAll(userId: string, db?: Prisma.TransactionClient) {
+    await this.sessions.revokeAllOfUser(userId, db);
+  }
+
   private async insert(
     userId: string,
     meta: RequestMeta,

@@ -15,14 +15,34 @@ export class UserRepository {
   }
 
   // Trùng email -> Prisma ném P2002; service (AuthService.register) đổi thành AppError('EMAIL_TAKEN').
-  create(data: { email: string; passwordHash: string | null; displayName: string }, db: Db = this.prisma) {
+  create(
+    data: { email: string; passwordHash: string | null; displayName: string },
+    db: Db = this.prisma,
+  ) {
     return db.user.create({ data, omit: { passwordHash: true } });
   }
 
-    markEmailVerified(id: string, db: Db = this.prisma) {
+  // Hồ sơ trả cho client: bỏ passwordHash, bỏ qua tài khoản đã xóa mềm.
+  findById(id: string, db: Db = this.prisma) {
+    return db.user.findUnique({
+      where: { id, deletedAt: null },
+      omit: { passwordHash: true },
+    });
+  }
+
+  markEmailVerified(id: string, db: Db = this.prisma) {
     return db.user.update({
-      where: { id ,deletedAt: null},
+      where: { id, deletedAt: null },
       data: { emailVerifiedAt: new Date() },
+      omit: { passwordHash: true },
+    });
+  }
+
+  // Tài khoản đã xóa mềm -> không khớp -> P2025; service đổi thành AppError.
+  setPassword(id: string, passwordHash: string, db: Db = this.prisma) {
+    return db.user.update({
+      where: { id, deletedAt: null },
+      data: { passwordHash },
       omit: { passwordHash: true },
     });
   }

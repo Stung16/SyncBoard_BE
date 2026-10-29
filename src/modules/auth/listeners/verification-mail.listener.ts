@@ -7,6 +7,10 @@ import {
   EMAIL_VERIFICATION_REQUESTED,
   type EmailVerificationRequestedEvent,
 } from '../events/email-verification-requested.event.js';
+import {
+  PASSWORD_RESET_REQUESTED,
+  type PasswordResetRequestedEvent,
+} from '../events/password-reset-requested.event.js';
 import { USER_REGISTERED } from '../events/user-registered.event.js';
 
 @Injectable()
@@ -33,6 +37,18 @@ export class VerificationMailListener {
       .catch((err: unknown) =>
         this.logger.warn(
           `Không gửi được mail xác minh cho user ${event.userId}: ${String(err)}`,
+        ),
+      );
+  }
+
+  @OnEvent(PASSWORD_RESET_REQUESTED, { async: true })
+  async sendPasswordResetMail(event: PasswordResetRequestedEvent) {
+    const link = `${this.config.get('APP_URL', { infer: true })}/reset-password?token=${event.resetToken}`;
+    await this.mail
+      .send(event.email, 'Đặt lại mật khẩu SyncBoard', link)
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Không gửi được mail đặt lại mật khẩu cho user ${event.userId}: ${String(err)}`,
         ),
       );
   }

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { AppError } from '../../../common/errors/app-error.js';
 import type { Prisma } from '../../../generated/prisma/client.js';
 import { UserRepository } from '../repositories/user.repository.js';
 
@@ -25,8 +26,17 @@ export class UserService {
     );
   }
 
-  // UserService
+  async getById(id: string) {
+    const user = await this.users.findById(id);
+    if (!user) throw new AppError('USER_NOT_FOUND'); // token còn hạn nhưng tài khoản đã bị xóa
+    return user;
+  }
+
   markEmailVerified(id: string, db?: Prisma.TransactionClient) {
     return this.users.markEmailVerified(id, db);
+  }
+
+  setPassword(id: string, passwordHash: string, db?: Prisma.TransactionClient) {
+    return this.users.setPassword(id, passwordHash, db);
   }
 }

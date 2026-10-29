@@ -16,13 +16,18 @@ import {
   EMAIL_VERIFICATION_REQUESTED,
   type EmailVerificationRequestedEvent,
 } from '../events/email-verification-requested.event.js';
+import {
+  PASSWORD_RESET_REQUESTED,
+  type PasswordResetRequestedEvent,
+} from '../events/password-reset-requested.event.js';
 import type { RequestMeta, TokenPair } from '../types/auth.types.js';
 import { SessionService } from './session.service.js';
 import { VerificationService } from './verification.service.js';
 import { LoginDto } from '../dto/login.dto.js';
 
 const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
-const RESEND_COOLDOWN_SECONDS = 60;
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // ngắn hơn verify: link này đổi được mật khẩu
+const MAIL_COOLDOWN_SECONDS = 60;
 
 @Injectable()
 export class AuthService {
@@ -113,12 +118,7 @@ export class AuthService {
     const user = await this.users.findByEmail(email);
     if (!user || user.deletedAt || user.emailVerifiedAt) return; // đã verify thì không phát token mới -> không ghi đè emailVerifiedAt
 
-    // 1 lần / 60s / user. Redis chứ không phải Map: nhiều node thì mỗi Map đếm riêng. NX = chỉ đặt khi chưa có key.
-    const allowed = await this.redis.set(`resend-verify:${user.id}`, '1', {
-      expiration: { type: 'EX', value: RESEND_COOLDOWN_SECONDS },
-      condition: 'NX',
-    });
-    if (!allowed) return;
+    if (!(await this.passCooldown(`resend-verify:${user.id}`))) return;
 
     const verifyToken = await this.prisma.$transaction((tx) =>
       this.verification.reissue(
@@ -135,6 +135,67 @@ export class AuthService {
       displayName: user.displayName,
       verifyToken,
     } satisfies EmailVerificationRequestedEvent);
+  }
+
+  // Cùng nguyên tắc resend: luôn im lặng -> controller luôn 204, không dò được email nào có tài khoản.
+  // Tài khoản chỉ đăng nhập Google (chưa có mật khẩu) cũng nhận được: đặt mật khẩu = thêm cách đăng nhập.
+  async forgotPassword(email: string) {
+    const user = await this.users.findByEmail(email);
+    if (!user || user.deletedAt) return;
+    if (!(await this.passCooldown(`forgot-password:${user.id}`))) return;
+
+    const resetToken = await this.prisma.$transaction((tx) =>
+      this.verification.reissue(
+        user.id,
+        'PASSWORD_RESET',
+        PASSWORD_RESET_TTL_MS,
+        tx,
+      ),
+    );
+
+    this.events.emit(PASSWORD_RESET_REQUESTED, {
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      resetToken,
+    } satisfies PasswordResetRequestedEvent);
+  }
+
+  // Không tự đăng nhập sau khi đặt lại: người dùng đăng nhập lại bằng mật khẩu mới.
+  async resetPassword(token: string, password: string) {
+    const passwordHash = await hash(password); // băm NGOÀI transaction, như register
+
+    await this.prisma
+      .$transaction(async (tx) => {
+        const userId = await this.verification.consume(
+          token,
+          'PASSWORD_RESET',
+          tx,
+        );
+        const user = await this.users.setPassword(userId, passwordHash, tx);
+        // Mở được link trong mail = chứng minh sở hữu email; không thì đặt mật khẩu xong vẫn bị EMAIL_NOT_VERIFIED.
+        if (!user.emailVerifiedAt)
+          await this.users.markEmailVerified(userId, tx);
+        // Mật khẩu cũ có thể đã lộ: đá mọi thiết bị ra (refresh token cũ hết dùng được).
+        await this.sessions.revokeAll(userId, tx);
+      })
+      .catch((e: unknown) => {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2025'
+        )
+          throw new AppError('INVALID_RESET_TOKEN'); // tài khoản đã xóa mềm
+        throw e;
+      });
+  }
+
+  // 1 lần / 60s / key. Redis chứ không phải Map: nhiều node thì mỗi Map đếm riêng. NX = chỉ đặt khi chưa có key.
+  private async passCooldown(key: string) {
+    const ok = await this.redis.set(key, '1', {
+      expiration: { type: 'EX', value: MAIL_COOLDOWN_SECONDS },
+      condition: 'NX',
+    });
+    return ok !== null;
   }
 
   // Access token mới + refresh token mới (token cũ bị thu hồi trong SessionService.rotate).

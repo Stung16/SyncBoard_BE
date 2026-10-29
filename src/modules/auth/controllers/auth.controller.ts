@@ -26,6 +26,12 @@ import {
 } from '../utils/refresh-cookie.js';
 import { type LoginDto, loginSchema } from '../dto/login.dto.js';
 import {
+  type ForgotPasswordDto,
+  forgotPasswordSchema,
+  type ResetPasswordDto,
+  resetPasswordSchema,
+} from '../dto/password-reset.dto.js';
+import {
   type ResendVerificationDto,
   resendVerificationSchema,
 } from '../dto/resend-verification.dto.js';
@@ -106,6 +112,28 @@ export class AuthController {
       refreshCookieOptions(this.sessions.refreshTtlMs),
     );
     return { accessToken, user };
+  }
+
+  // Luôn 204 dù email có tài khoản hay không: response không tiết lộ gì (giống resend-verification).
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: hours(1) } }) // mỗi lần gọi tốn một mail; 60s/user nằm trong service
+  @Post('forgot-password')
+  @HttpCode(204)
+  async forgotPassword(
+    @Body({ schema: forgotPasswordSchema }) { email }: ForgotPasswordDto,
+  ) {
+    await this.auth.forgotPassword(email);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: hours(1) } })
+  @Post('reset-password')
+  @HttpCode(204)
+  async resetPassword(
+    @Body({ schema: resetPasswordSchema })
+    { token, password }: ResetPasswordDto,
+  ) {
+    await this.auth.resetPassword(token, password);
   }
 
   // Public: access token đã hết hạn chính là lúc gọi refresh. Danh tính nằm trong cookie refresh (httpOnly).

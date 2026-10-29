@@ -3,7 +3,13 @@ import type { Prisma } from '../../../generated/prisma/client.js';
 import type { VerificationTokenType } from '../../../generated/prisma/enums.js';
 import { VerificationTokenRepository } from '../repositories/verification-token.repository.js';
 import { randomToken, sha256 } from '../utils/token.util.js';
-import { AppError } from '../../../common/errors/app-error.js';
+import { AppError, type ErrorCode } from '../../../common/errors/app-error.js';
+
+// Mỗi loại token một câu báo lỗi; thêm loại mới vào enum mà quên dòng ở đây -> lỗi biên dịch.
+const INVALID_TOKEN = {
+  EMAIL_VERIFY: 'INVALID_VERIFY_TOKEN',
+  PASSWORD_RESET: 'INVALID_RESET_TOKEN',
+} as const satisfies Record<VerificationTokenType, ErrorCode>;
 
 @Injectable()
 export class VerificationService {
@@ -46,12 +52,11 @@ export class VerificationService {
     db?: Prisma.TransactionClient,
   ): Promise<string> {
     const row = await this.tokens.findByTokenHash(sha256(token), db);
-    // TODO: nếu !row || row.type !== type || row.usedAt || row.expiresAt <= new Date()
     if (!row || row.type !== type || row.usedAt || row.expiresAt <= new Date())
-      throw new AppError('INVALID_VERIFY_TOKEN');
+      throw new AppError(INVALID_TOKEN[type]);
 
     const count = await this.tokens.markUsed(row.id, db);
-    if (count === 0) throw new AppError('INVALID_VERIFY_TOKEN');
+    if (count === 0) throw new AppError(INVALID_TOKEN[type]);
     return row.userId;
   }
 }

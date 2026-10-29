@@ -38,6 +38,15 @@ export class SessionRepository {
     return count;
   }
 
+  // Đổi mật khẩu / đăng xuất mọi thiết bị: thu hồi mọi phiên còn sống của user.
+  async revokeAllOfUser(userId: string, db: Db = this.prisma) {
+    const { count } = await db.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return count;
+  }
+
   // Phát hiện token đã bị thay mà vẫn được dùng -> giết cả family (một lần đăng nhập trên một thiết bị).
   // Gọi NGOÀI transaction rồi mới throw: ném lỗi trong $transaction sẽ rollback luôn việc thu hồi này.
   async revokeFamily(familyId: string, db: Db = this.prisma) {

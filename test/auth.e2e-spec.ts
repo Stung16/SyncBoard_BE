@@ -240,12 +240,70 @@ describe('Auth (e2e)', () => {
     });
   });
 
+  describe('POST /api/v1/auth/forgot-password + /reset-password', () => {
+    const post = (path: string, body: object) => request(app.getHttpServer()).post(`/api/v1/auth/${path}`).send(body);
+    const linkToken = (send: { mock: { calls: unknown[][] } }, email: string, path: string) =>
+      vi.waitFor(() => {
+        const link = send.mock.calls.find((c) => c[0] === email && String(c[2]).includes(path))![2] as string;
+        return new URL(link).searchParams.get('token')!;
+      });
+
+    it('luồng đầy đủ: mail link -> đặt mật khẩu mới -> mọi session cũ chết, mật khẩu cũ sai, mật khẩu mới đăng nhập được', async () => {
+      const send = vi.spyOn(app.get(MailService), 'send');
+      const email = `${randomUUID()}@e2e.test`;
+      await post('register', { email, password: 'old-password-1', displayName: 'An' }).expect(201);
+      const verified = await post('verify-email', { token: await linkToken(send, email, '/verify-email') }).expect(200);
+      const rt = ([] as string[]).concat(verified.headers['set-cookie'] ?? []).find((c) => c.startsWith('rt='))!.split(';')[0]!;
+
+      await post('forgot-password', { email: ` ${email.toUpperCase()} ` }).expect(204);
+      const resetToken = await linkToken(send, email, '/reset-password');
+      await post('reset-password', { token: resetToken, password: 'new-password-1' }).expect(204);
+
+      await request(app.getHttpServer()).post('/api/v1/auth/refresh').set('Cookie', rt).expect(401); // thiết bị cũ bị đá ra
+      expect((await post('login', { email, password: 'old-password-1' }).expect(401)).body.errors[0].code).toBe('INVALID_CREDENTIALS');
+      await post('login', { email, password: 'new-password-1' }).expect(200);
+      expect((await post('reset-password', { token: resetToken, password: 'another-pass-1' }).expect(400)).body.errors[0].code).toBe('INVALID_RESET_TOKEN'); // dùng 1 lần
+    });
+
+    it('chưa verify email mà đặt lại mật khẩu -> email được verify luôn, đăng nhập được', async () => {
+      const send = vi.spyOn(app.get(MailService), 'send');
+      const email = `${randomUUID()}@e2e.test`;
+      await post('register', { email, password: 'old-password-1', displayName: 'An' }).expect(201);
+      await post('forgot-password', { email }).expect(204);
+      await post('reset-password', { token: await linkToken(send, email, '/reset-password'), password: 'new-password-1' }).expect(204);
+      await post('login', { email, password: 'new-password-1' }).expect(200);
+    });
+
+    it('email lạ -> 204, không mail; token verify không dùng để reset được; mật khẩu ngắn -> 400 field password', async () => {
+      const send = vi.spyOn(app.get(MailService), 'send');
+      const email = `${randomUUID()}@e2e.test`;
+      const stranger = `${randomUUID()}@e2e.test`;
+      await post('forgot-password', { email: stranger }).expect(204);
+
+      await post('register', { email, password: 'old-password-1', displayName: 'An' }).expect(201);
+      const verifyToken = await linkToken(send, email, '/verify-email');
+      expect((await post('reset-password', { token: verifyToken, password: 'new-password-1' }).expect(400)).body.errors[0].code).toBe('INVALID_RESET_TOKEN');
+
+      const short = await post('reset-password', { token: 'x', password: 'short' }).expect(400);
+      expect(short.body.errors[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'password' });
+      await new Promise((r) => setTimeout(r, 50)); // listener chạy async: cho nó cơ hội chạy nếu lỡ có event
+      // spy giữ cả mail của test trước -> chỉ xét 2 email của test này
+      expect(send.mock.calls.filter((c) => c[0] === stranger || (c[0] === email && String(c[2]).includes('/reset-password')))).toHaveLength(0);
+    });
+  });
+
   describe('JWT guard (Passport strategy "jwt")', () => {
     it('không token -> 401', () => request(app.getHttpServer()).get('/api/v1/me').expect(401));
 
-    it('token hợp lệ -> 200, req.user = { id }', async () => {
-      const token = await jwt.signAsync({ sub: 'user-123' });
-      await request(app.getHttpServer()).get('/api/v1/me').auth(token, { type: 'bearer' }).expect(200, { id: 'user-123' });
+    it('token hợp lệ -> 200, hồ sơ đọc từ DB (không có passwordHash); user không còn -> 404 USER_NOT_FOUND', async () => {
+      const user = await prisma.user.create({ data: { email: `${randomUUID()}@e2e.test`, displayName: 'An', passwordHash: 'x' } });
+      const res = await request(app.getHttpServer()).get('/api/v1/me').auth(await jwt.signAsync({ sub: user.id }), { type: 'bearer' }).expect(200);
+      expect(res.body).toMatchObject({ id: user.id, email: user.email, displayName: 'An' });
+      expect(res.body).not.toHaveProperty('passwordHash');
+
+      await prisma.user.update({ where: { id: user.id }, data: { deletedAt: new Date() } });
+      const gone = await request(app.getHttpServer()).get('/api/v1/me').auth(await jwt.signAsync({ sub: user.id }), { type: 'bearer' }).expect(404);
+      expect(gone.body.errors[0].code).toBe('USER_NOT_FOUND');
     });
 
     it('token sai chữ ký / hết hạn -> 401 chung, không lộ lý do', async () => {
