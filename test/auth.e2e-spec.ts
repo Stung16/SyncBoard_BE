@@ -173,6 +173,73 @@ describe('Auth (e2e)', () => {
     });
   });
 
+  describe('POST /api/v1/auth/refresh + /logout', () => {
+    const rtOf = (res: request.Response) =>
+      ([] as string[]).concat(res.headers['set-cookie'] ?? []).find((c) => c.startsWith('rt='))?.split(';')[0]!.slice(3);
+    const refresh = (rt?: string) => {
+      const req = request(app.getHttpServer()).post('/api/v1/auth/refresh');
+      return rt ? req.set('Cookie', `rt=${rt}`) : req;
+    };
+    // Đăng ký + verify (phương án B) -> có cookie refresh đầu tiên
+    const signIn = async () => {
+      const send = vi.spyOn(app.get(MailService), 'send');
+      const email = `${randomUUID()}@e2e.test`;
+      await request(app.getHttpServer()).post('/api/v1/auth/register').send({ email, password: 'correct-horse-1', displayName: 'An' }).expect(201);
+      const link = await vi.waitFor(() => send.mock.calls.find((c) => c[0] === email)![2]);
+      const res = await request(app.getHttpServer()).post('/api/v1/auth/verify-email').send({ token: new URL(link).searchParams.get('token') }).expect(200);
+      return { userId: res.body.user.id as string, rt: rtOf(res)! };
+    };
+
+    it('refresh: access token mới + cookie MỚI; token cũ hết dùng được', async () => {
+      const { userId, rt } = await signIn();
+      const res = await refresh(rt).expect(200);
+      expect(await jwt.verifyAsync(res.body.accessToken)).toMatchObject({ sub: userId });
+      const next = rtOf(res)!;
+      expect(next).not.toBe(rt);
+
+      const old = await prisma.session.findUniqueOrThrow({ where: { tokenHash: sha256(rt) } });
+      const fresh = await prisma.session.findUniqueOrThrow({ where: { tokenHash: sha256(next) } });
+      expect(old).toMatchObject({ revokedAt: expect.any(Date), replacedById: fresh.id });
+      expect(fresh.familyId).toBe(old.familyId);
+
+      expect((await refresh(rt).expect(401)).body.errors[0].code).toBe('INVALID_REFRESH_TOKEN');
+      await refresh(next).expect(200); // token mới vẫn dùng được (lần dùng lại trên nằm trong 10s ân hạn)
+    });
+
+    it('dùng lại token đã bị thay từ lâu (bị đánh cắp) -> 401 và thu hồi CẢ family, token mới cũng chết', async () => {
+      const { userId, rt } = await signIn();
+      const next = rtOf(await refresh(rt).expect(200))!;
+      await prisma.session.updateMany({ where: { tokenHash: sha256(rt) }, data: { revokedAt: new Date(Date.now() - 60_000) } }); // giả lập "đã lâu"
+
+      await refresh(rt).expect(401);
+      expect(await prisma.session.count({ where: { userId, revokedAt: null } })).toBe(0);
+      await refresh(next).expect(401);
+    });
+
+    it('2 request refresh cùng lúc, cùng cookie -> đúng 1 thành công, chỉ 1 session mới', async () => {
+      const { userId, rt } = await signIn();
+      const statuses = (await Promise.all([refresh(rt), refresh(rt)])).map((r) => r.status).sort((x, y) => x - y);
+      expect(statuses).toEqual([200, 401]);
+      expect(await prisma.session.count({ where: { userId } })).toBe(2); // session đầu + 1 session mới
+    });
+
+    it('logout: 204, xóa cookie đúng path, session bị thu hồi -> refresh bằng cookie đó 401', async () => {
+      const { rt } = await signIn();
+      const res = await request(app.getHttpServer()).post('/api/v1/auth/logout').set('Cookie', `rt=${rt}`).expect(204);
+      const cleared = ([] as string[]).concat(res.headers['set-cookie'] ?? []).find((c) => c.startsWith('rt='))!;
+      expect(cleared).toMatch(/^rt=;/);
+      expect(cleared).toMatch(/Path=\/api\/v1\/auth/);
+      expect(cleared).toMatch(/Expires=Thu, 01 Jan 1970/);
+      await refresh(rt).expect(401);
+    });
+
+    it('không có cookie: refresh 401, logout vẫn 204', async () => {
+      expect((await refresh().expect(401)).body.errors[0].code).toBe('INVALID_REFRESH_TOKEN');
+      await request(app.getHttpServer()).post('/api/v1/auth/logout').expect(204);
+      await refresh('token-bia').expect(401);
+    });
+  });
+
   describe('JWT guard (Passport strategy "jwt")', () => {
     it('không token -> 401', () => request(app.getHttpServer()).get('/api/v1/me').expect(401));
 

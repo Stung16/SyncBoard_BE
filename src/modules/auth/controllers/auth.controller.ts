@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Public } from '../../../common/decorators/public.decorator.js';
+import { AppError } from '../../../common/errors/app-error.js';
 import { registerSchema, type RegisterDto } from '../dto/register.dto.js';
 import {
   verifyEmailSchema,
@@ -105,6 +106,39 @@ export class AuthController {
       refreshCookieOptions(this.sessions.refreshTtlMs),
     );
     return { accessToken, user };
+  }
+
+  // Public: access token đã hết hạn chính là lúc gọi refresh. Danh tính nằm trong cookie refresh (httpOnly).
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: minutes(1) } }) // frontend tự gọi -> rộng tay hơn login
+  @Post('refresh')
+  @HttpCode(200)
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const token: unknown = req.cookies?.[REFRESH_COOKIE]; // cookie là dữ liệu từ ngoài vào: kiểm kiểu trước khi dùng
+    if (typeof token !== 'string') throw new AppError('INVALID_REFRESH_TOKEN');
+    const { accessToken, refreshToken } = await this.auth.refresh(
+      token,
+      metaOf(req),
+    );
+    res.cookie(
+      REFRESH_COOKIE,
+      refreshToken,
+      refreshCookieOptions(this.sessions.refreshTtlMs),
+    ); // đè cookie cũ
+    return { accessToken };
+  }
+
+  // Public + luôn 204: phải đăng xuất được cả khi access token đã hết hạn hoặc cookie đã hỏng.
+  @Public()
+  @Post('logout')
+  @HttpCode(204)
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const token: unknown = req.cookies?.[REFRESH_COOKIE];
+    if (typeof token === 'string') await this.sessions.revoke(token);
+    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0)); // PHẢI cùng path lúc đặt, sai path trình duyệt không xóa
   }
 
   @Public()

@@ -23,6 +23,10 @@ export const ERRORS = {
     status: HttpStatus.TOO_MANY_REQUESTS,
     message: 'Bạn thao tác quá nhanh, vui lòng thử lại sau',
   },
+  INVALID_REFRESH_TOKEN: {
+    status: HttpStatus.UNAUTHORIZED,
+    message: 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại',
+  },
 } as const satisfies Record<string, { status: HttpStatus; message: string }>;
 
 export type ErrorCode = keyof typeof ERRORS;

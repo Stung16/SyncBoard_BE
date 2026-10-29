@@ -137,6 +137,15 @@ export class AuthService {
     } satisfies EmailVerificationRequestedEvent);
   }
 
+  // Access token mới + refresh token mới (token cũ bị thu hồi trong SessionService.rotate).
+  async refresh(token: string, meta: RequestMeta): Promise<TokenPair> {
+    const { userId, refreshToken } = await this.sessions.rotate(token, meta);
+    return {
+      accessToken: await this.jwt.signAsync({ sub: userId }),
+      refreshToken,
+    };
+  }
+
   // Điểm duy nhất phát token: register, login, Google callback đều kết thúc ở đây.
   async issueTokens(userId: string, meta: RequestMeta): Promise<TokenPair> {
     const accessToken = await this.jwt.signAsync({ sub: userId }); // hạn lấy từ JwtModule (JWT_ACCESS_TTL_SECONDS)
