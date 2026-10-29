@@ -1,9 +1,11 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { PrismaService } from '../../infra/database/prisma.service.js';
 import { REDIS, type RedisClient } from '../../infra/redis/redis.module.js';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators/public.decorator.js';
 
 @Public()
+@SkipThrottle() // load balancer gọi liên tục; bị 429 thì LB tưởng node chết và gỡ ra
 @Controller('health')
 export class HealthController {
   constructor(

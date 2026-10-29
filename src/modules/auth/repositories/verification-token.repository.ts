@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type {
-  Prisma
+  Prisma,
+  VerificationTokenType,
 } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../infra/database/prisma.service.js';
 
@@ -22,13 +23,22 @@ export class VerificationTokenRepository {
     return db.verificationToken.findUnique({ where: { tokenHash } });
   }
 
-  // Trả về số dòng đã cập nhật: 1 = mình là người dùng token, 0 = người khác đã dùng trước
   async markUsed(id: string, db: Db = this.prisma) {
     const { count } = await db.verificationToken.updateMany({
-      where: { id, usedAt: null }, // ← điều kiện quan trọng nhất
+      where: { id, usedAt: null },
       data: { usedAt: new Date() },
     });
     return count;
   }
 
+  // Xóa hẳn (không đánh usedAt) để "đã dùng" và "đã bị thay thế" không lẫn vào nhau. Chạy trên index (userId, type).
+  deleteUnused(
+    userId: string,
+    type: VerificationTokenType,
+    db: Db = this.prisma,
+  ) {
+    return db.verificationToken.deleteMany({
+      where: { userId, type, usedAt: null },
+    });
+  }
 }

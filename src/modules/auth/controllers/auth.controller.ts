@@ -19,7 +19,16 @@ import { GoogleOAuthGuard } from '../guards/google-oauth.guard.js';
 import { AuthService } from '../services/auth.service.js';
 import { SessionService } from '../services/session.service.js';
 import type { OAuthProfile, RequestMeta } from '../types/auth.types.js';
-import { REFRESH_COOKIE, refreshCookieOptions } from '../utils/refresh-cookie.js';
+import {
+  REFRESH_COOKIE,
+  refreshCookieOptions,
+} from '../utils/refresh-cookie.js';
+import { type LoginDto, loginSchema } from '../dto/login.dto.js';
+import {
+  type ResendVerificationDto,
+  resendVerificationSchema,
+} from '../dto/resend-verification.dto.js';
+import { hours, minutes, Throttle } from '@nestjs/throttler';
 
 // ip + user-agent lưu vào sessions cho trang "thiết bị đang đăng nhập"
 const metaOf = (req: Request): RequestMeta => ({
@@ -35,20 +44,15 @@ export class AuthController {
   ) {}
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: hours(1) } }) // chống tạo tài khoản rác hàng loạt
   @Post('register')
   @HttpCode(201)
-  async register(
-    @Body({ schema: registerSchema }) dto: RegisterDto,
-    @Req() req: Request,
-  ) {
+  async register(@Body({ schema: registerSchema }) dto: RegisterDto) {
     const { user } = await this.auth.register(dto);
-    // res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions(this.sessions.refreshTtlMs));
     return { user, requiresEmailVerification: true };
   }
 
-  // TODO(bạn code): login, refresh, logout, verify-email, forgot/reset-password
-
-  @Public()
+  @Public() // người bấm link trong mail chưa đăng nhập
   @Post('verify-email')
   @HttpCode(200) // POST mặc định 201; xác minh không tạo tài nguyên mới
   async verifyEmail(
@@ -58,6 +62,41 @@ export class AuthController {
   ) {
     const { accessToken, refreshToken, user } = await this.auth.verifyEmail(
       token,
+      metaOf(req),
+    );
+    res.cookie(
+      REFRESH_COOKIE,
+      refreshToken,
+      refreshCookieOptions(this.sessions.refreshTtlMs),
+    );
+    return { accessToken, user };
+  }
+
+  // Luôn 204 dù email có tồn tại / đã verify / đang chờ 60s hay không: response không tiết lộ gì.
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: hours(1) } }) // mỗi lần gọi tốn một mail; 60s/user nằm trong service
+  @Post('resend-verification')
+  @HttpCode(204)
+  async resendVerification(
+    @Body({ schema: resendVerificationSchema })
+    { email }: ResendVerificationDto,
+  ) {
+    await this.auth.resendVerification(email);
+  }
+
+  @Public()
+  @Throttle({
+    default: { limit: 5, ttl: minutes(1), blockDuration: minutes(15) },
+  }) // quá 5 lần/phút -> khóa 15 phút
+  @Post('login')
+  @HttpCode(200)
+  async login(
+    @Body({ schema: loginSchema }) dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, refreshToken, user } = await this.auth.login(
+      dto,
       metaOf(req),
     );
     res.cookie(

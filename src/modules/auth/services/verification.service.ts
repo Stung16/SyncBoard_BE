@@ -29,6 +29,17 @@ export class VerificationService {
     return token;
   }
 
+  // Thay token cũ bằng token mới: link trong các mail trước hết hiệu lực, mỗi user chỉ còn MỘT link dùng được.
+  async reissue(
+    userId: string,
+    type: VerificationTokenType,
+    ttlMs: number,
+    db?: Prisma.TransactionClient,
+  ) {
+    await this.tokens.deleteUnused(userId, type, db);
+    return this.issue(userId, type, ttlMs, db);
+  }
+
   async consume(
     token: string,
     type: VerificationTokenType,
@@ -43,5 +54,4 @@ export class VerificationService {
     if (count === 0) throw new AppError('INVALID_VERIFY_TOKEN');
     return row.userId;
   }
-
 }

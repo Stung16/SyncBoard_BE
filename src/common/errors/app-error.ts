@@ -19,6 +19,10 @@ export const ERRORS = {
     status: HttpStatus.FORBIDDEN,
     message: 'Vui lòng xác minh email trước khi đăng nhập',
   },
+  RATE_LIMITED: {
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    message: 'Bạn thao tác quá nhanh, vui lòng thử lại sau',
+  },
 } as const satisfies Record<string, { status: HttpStatus; message: string }>;
 
 export type ErrorCode = keyof typeof ERRORS;
