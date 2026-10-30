@@ -35,6 +35,10 @@ export const ERRORS = {
     status: HttpStatus.UNAUTHORIZED,
     message: 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại',
   },
+  BOARD_NOT_FOUND: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'Bảng không tồn tại',
+  },
 } as const satisfies Record<string, { status: HttpStatus; message: string }>;
 
 export type ErrorCode = keyof typeof ERRORS;

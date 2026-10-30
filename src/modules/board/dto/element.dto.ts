@@ -1,0 +1,71 @@
+import { z } from 'zod';
+
+// --- Các mảnh dùng chung ---
+// z.number() của Zod 4 đã từ chối NaN và Infinity. Thêm min/max: số khổng lồ làm canvas vẽ sai và mất độ chính xác.
+const coord = z.number().min(-1e7).max(1e7);
+const size = z.number().min(0).max(1e7);
+const opacity = z.number().min(0).max(1);
+// Chỉ nhận màu hex (#rrggbb hoặc #rrggbbaa) hoặc 'transparent': chặn chuỗi rác/khổng lồ lọt vào DB rồi phát cho cả phòng.
+const color = z
+  .string()
+  .regex(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i)
+  .or(z.literal('transparent'));
+
+export const elementId = z.string().min(1).max(64); // client tự sinh (UUID), chỉ cần duy nhất trong một bảng
+
+// --- data riêng theo từng type (bảng 4.2 của spec) ---
+// strictObject: khóa lạ trong data -> từ chối, không để client nhét field tùy ý vào DB.
+const shapeData = z.strictObject({
+  x: coord,
+  y: coord,
+  width: size,
+  height: size,
+  angle: z.number(),
+  strokeColor: color,
+  fillColor: color,
+  strokeWidth: z.number().min(0).max(100),
+  strokeStyle: z.enum(['solid', 'dashed']),
+  opacity,
+});
+
+export const elementDataSchemas = {
+  freedraw: z.strictObject({
+    x: coord,
+    y: coord,
+    points: z
+      .array(z.tuple([coord, coord]))
+      .min(1)
+      .max(5000), // [x, y] tương đối với (x, y); 5.000 điểm = giới hạn 8.3
+    strokeColor: color,
+    strokeWidth: z.number().min(0.5).max(100),
+    opacity,
+  }),
+  rect: shapeData,
+  ellipse: shapeData,
+  diamond: shapeData,
+  // TODO GĐ1 (tự làm): text { x, y, width, text: max 10.000, fontSize, color, align }, sticky { x, y, width, height, text, color }
+  // GĐ2: line/arrow, image, frame
+};
+export type ElementType = keyof typeof elementDataSchemas;
+
+// --- element đầy đủ (dùng trong op add) ---
+const base = {
+  id: elementId,
+  groupId: elementId.nullable().optional(), // 2.6, chưa dùng ở GĐ1 nhưng để sẵn để khỏi đổi giao thức
+  frameId: elementId.nullable().optional(), // 5.7
+};
+
+// discriminatedUnion theo 'type' = allowlist: type không có trong danh sách -> từ chối (UC 2.1).
+export const elementSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    ...base,
+    type: z.literal('freedraw'),
+    data: elementDataSchemas.freedraw,
+  }),
+  z.strictObject({
+    ...base,
+    type: z.enum(['rect', 'ellipse', 'diamond']),
+    data: shapeData,
+  }),
+]);
+export type ElementDto = z.infer<typeof elementSchema>;
