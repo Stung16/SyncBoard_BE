@@ -163,6 +163,7 @@ export class BoardGateway implements OnGatewayInit, OnGatewayDisconnect {
       };
     } catch (e) {
       if (e instanceof AppError && e.code === 'BOARD_NOT_FOUND') return { ok: false, reason: 'not_found' };
+      if (e instanceof AppError && e.code === 'SHUTTING_DOWN') return { ok: false, reason: 'shutting_down' }; // node đang tắt: gửi lại sau khi nối lại
       this.logger.error(e);
       return { ok: false, reason: 'internal' };
     }

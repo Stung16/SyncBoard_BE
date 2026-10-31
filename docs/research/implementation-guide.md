@@ -895,7 +895,10 @@ File: `modules/comment/{comment.module, comment.controller, comment.service, dto
 ### 10.3 Graceful shutdown
 
 1. `app.enableShutdownHooks()`. Mặc định hook tắt [S9].
-2. `BoardService` (hoặc module board) implement `beforeApplicationShutdown()`: `await boardLocks.drain()`. Hook async được chờ cho tới khi xong [S9].
+2. `BoardLocks` implement **`onModuleDestroy()`** (không phải `beforeApplicationShutdown()`): đặt cờ `closing` (lô mới bị từ chối `SHUTTING_DOWN`) rồi `await this.drain()`. Hook async được chờ cho tới khi xong [S9].
+   - Đã kiểm trong mã nguồn `@nestjs/core` 12 (`runShutdownSequence`): thứ tự là `onModuleDestroy` (mọi module) → `beforeApplicationShutdown` → đóng socket/HTTP → `onApplicationShutdown`. Module global (`PrismaModule`) có distance lớn nhất nên bị hủy **sau cùng** trong `onModuleDestroy`.
+   - Drain ở `beforeApplicationShutdown` thì Prisma đã `$disconnect` rồi: lô đang chạy lỗi (đã thử: `test/shutdown.e2e-spec.ts` đỏ).
+   - Socket vẫn mở trong lúc drain, nên phải có cờ `closing`, không thì op mới chui vào sau khi drain xong.
 3. `PrismaService.onModuleDestroy()` gọi `$disconnect()`.
 4. **Windows:** Nest "has limited support for application shutdown hooks on Windows", và `SIGTERM` không chạy [S9]. Trên máy dev Windows, Ctrl+C có thể không chạy đủ các hook. Kiểm tra shutdown trong Docker hoặc Linux.
 

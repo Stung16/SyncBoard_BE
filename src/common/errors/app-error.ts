@@ -59,6 +59,10 @@ export const ERRORS = {
     status: HttpStatus.NOT_FOUND,
     message: 'Phiên bản không tồn tại',
   },
+  SHUTTING_DOWN: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    message: 'Máy chủ đang khởi động lại, vui lòng thử lại',
+  },
   INVITATION_NOT_FOUND: {
     status: HttpStatus.NOT_FOUND,
     message: 'Lời mời không tồn tại hoặc đã bị thu hồi',

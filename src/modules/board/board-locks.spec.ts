@@ -92,4 +92,20 @@ describe('BoardLocks', () => {
     await locks.drain();
     expect(done).toBe(true);
   });
+
+  it('onModuleDestroy (tắt app): chờ việc đang chạy + đang xếp hàng xong; việc tới SAU đó bị từ chối SHUTTING_DOWN', async () => {
+    const done: string[] = [];
+    const running = locks.run('b1', async () => {
+      await sleep(20);
+      done.push('running');
+    });
+    const queued = locks.run('b1', async () => {
+      done.push('queued');
+    });
+    await locks.onModuleDestroy();
+    expect(done).toEqual(['running', 'queued']);
+    await Promise.all([running, queued]);
+    await expect(locks.run('b2', async () => 'late')).rejects.toMatchObject({ code: 'SHUTTING_DOWN' });
+    expect(locks.size()).toBe(0);
+  });
 });
