@@ -4,6 +4,8 @@ import { PrismaService } from '../../../infra/database/prisma.service.js';
 
 type Db = Prisma.TransactionClient;
 
+const BOARD_FIELDS = { id: true, title: true, createdAt: true, updatedAt: true } as const;
+
 // Chỉ chứa query bảng boards.
 @Injectable()
 export class BoardRepository {
@@ -23,6 +25,25 @@ export class BoardRepository {
       where: { id: boardId, deletedAt: null },
       select: { title: true, ownerId: true, members: { where: { userId }, select: { role: true } } },
     });
+  }
+
+  // Trang "bảng của tôi" (6.2): bảng mình là thành viên, sửa gần nhất lên đầu (updated_at đổi mỗi lô op vì last_seq đổi).
+  listForUser(userId: string, search: string | undefined, take: number) {
+    return this.prisma.boardMember.findMany({
+      where: { userId, board: { deletedAt: null, ...(search && { title: { contains: search, mode: 'insensitive' } }) } },
+      orderBy: { board: { updatedAt: 'desc' } },
+      take,
+      select: { role: true, board: { select: BOARD_FIELDS } },
+    });
+  }
+
+  rename(boardId: string, title: string) {
+    return this.prisma.board.update({ where: { id: boardId }, data: { title }, select: BOARD_FIELDS });
+  }
+
+  // Xóa mềm: elements/operations giữ nguyên (khôi phục tay được); mọi query đã lọc deletedAt.
+  softDelete(boardId: string) {
+    return this.prisma.board.update({ where: { id: boardId }, data: { deletedAt: new Date() } });
   }
 
   async findLastSeq(boardId: string, db: Db) {

@@ -14,9 +14,13 @@ import { BoardRepository } from '../repositories/board.repository.js';
 import { ElementRepository } from '../repositories/element.repository.js';
 import { AssetRepository } from '../repositories/asset.repository.js';
 import { OperationRepository } from '../repositories/operation.repository.js';
+import { SharingService } from './sharing.service.js';
 
 export type RejectedOp = { opId: string; reason: RejectReason; current?: ElementState };
 export type DuplicateOp = { opId: string; seq: number }; // op đã lưu từ lần gửi trước -> trả lại seq cũ
+
+// shortcut: "bảng của tôi" trả tối đa 100 bảng, chưa phân trang. Cần thì thêm cursor theo updatedAt.
+const LIST_LIMIT = 100;
 
 // Lỡ nhiều hơn số này thì gửi cả bảng: 1 lần tải nhanh hơn phát lại hàng nghìn op
 const MISSED_OPS_LIMIT = 1000;
@@ -29,12 +33,37 @@ export class BoardService {
     private readonly elements: ElementRepository,
     private readonly operations: OperationRepository,
     private readonly assets: AssetRepository,
+    private readonly sharing: SharingService,
     private readonly locks: BoardLocks,
     private readonly emitter: SocketEmitter,
   ) {}
 
   create(ownerId: string, title?: string) {
     return this.boards.create(ownerId, title);
+  }
+
+  async list(userId: string, search?: string) {
+    return (await this.boards.listForUser(userId, search || undefined, LIST_LIMIT)).map(({ role, board }) => ({ ...board, role }));
+  }
+
+  // Thông tin bảng + vai trò của mình (FE ẩn/hiện nút theo role). Người lạ -> 404.
+  async get(boardId: string, userId: string) {
+    const { title, role } = await this.sharing.authorize(boardId, userId, 'view');
+    return { id: boardId, title, role };
+  }
+
+  async rename(boardId: string, userId: string, title: string) {
+    await this.sharing.authorize(boardId, userId, 'renameOrDeleteBoard');
+    const board = await this.boards.rename(boardId, title);
+    this.emitter.toBoard(boardId, 'BoardRenamed', { title }); // người đang mở bảng thấy tên mới ngay
+    return board;
+  }
+
+  // Xóa mềm rồi đá mọi người đang mở bảng: JoinBoard lại sẽ nhận not_found.
+  async remove(boardId: string, userId: string) {
+    await this.sharing.authorize(boardId, userId, 'renameOrDeleteBoard');
+    await this.boards.softDelete(boardId);
+    this.emitter.kickFromBoard(`board:${boardId}`, 'board_deleted');
   }
 
   // Ảnh chụp bảng cho người vừa vào. RepeatableRead: 2 câu đọc thấy CÙNG một thời điểm (last_seq khớp elements).

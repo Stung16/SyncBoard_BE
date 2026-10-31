@@ -9,7 +9,7 @@ import { REDIS, type RedisClient } from '../src/infra/redis/redis.module.js';
 import { SocketEmitter } from '../src/infra/socket/socket-emitter.service.js';
 import type { OpDto } from '../src/modules/board/dto/op.dto.js';
 import { BoardService } from '../src/modules/board/services/board.service.js';
-import { createBoard, createUser } from './helpers.js';
+import { connect, createBoard, createUser, joinPayload, nextEvent } from './helpers.js';
 
 const RECT = { x: 0, y: 0, width: 10, height: 10, angle: 0, strokeColor: '#000000', fillColor: 'transparent', strokeWidth: 1, strokeStyle: 'solid', opacity: 1 };
 const add = (id: string = randomUUID()): OpDto => ({ opId: randomUUID(), type: 'add', element: { id, type: 'rect', data: RECT } }) as OpDto;
@@ -322,6 +322,84 @@ describe('Board (e2e)', () => {
         { opId: randomUUID(), type: 'restore', clearSeq: 999 },
       ]);
       expect(res.rejected.map((r) => r.reason)).toEqual(['not_found', 'not_found']);
+    });
+  });
+
+  describe('danh sách / xem / đổi tên / xóa bảng (6.2)', () => {
+    const http = (token: string) => {
+      const r = request(app.getHttpServer());
+      const auth = <T extends { set: (k: string, v: string) => T }>(x: T) => x.set('Authorization', `Bearer ${token}`);
+      return {
+        get: (path: string) => auth(r.get(`/api/v1${path}`)),
+        patch: (path: string, body: object) => auth(r.patch(`/api/v1${path}`)).send(body),
+        delete: (path: string) => auth(r.delete(`/api/v1${path}`)),
+      };
+    };
+
+    it('GET /boards: chỉ bảng mình là thành viên (kèm role), sửa gần nhất lên đầu; ?search không phân biệt hoa thường; bảng đã xóa không hiện', async () => {
+      const [me, other] = [await createUser(app), await createUser(app)];
+      const mk = (owner: string, title: string, members: string[] = []) =>
+        prisma.board.create({
+          data: { title, ownerId: owner, members: { create: [{ userId: owner, role: 'OWNER' }, ...members.map((userId) => ({ userId, role: 'VIEWER' as const }))] } },
+        });
+      const a = await mk(me.id, 'Họp Sprint');
+      const b = await mk(other.id, 'Thiết kế', [me.id]);
+      await mk(other.id, 'Không liên quan');
+      const gone = await mk(me.id, 'Sprint cũ');
+      await prisma.board.update({ where: { id: gone.id }, data: { deletedAt: new Date() } });
+      await boards.submitOps(a.id, me.id, [add()]); // a vừa sửa -> lên đầu
+
+      const { body } = await http(me.token).get('/boards').expect(200);
+      expect(body.map((x: { id: string; role: string }) => [x.id, x.role])).toEqual([
+        [a.id, 'OWNER'],
+        [b.id, 'VIEWER'],
+      ]);
+      expect(body[0]).toEqual({ id: a.id, title: 'Họp Sprint', role: 'OWNER', createdAt: expect.any(String), updatedAt: expect.any(String) });
+      const found = await http(me.token).get('/boards?search=sPRINT').expect(200);
+      expect(found.body.map((x: { id: string }) => x.id)).toEqual([a.id]);
+      await http(me.token).get(`/boards?search=${'x'.repeat(51)}`).expect(400);
+    });
+
+    it('GET /boards/:id -> tên + vai trò của mình; người lạ -> 404', async () => {
+      const [owner, stranger] = [await createUser(app), await createUser(app)];
+      const board = await createBoard(app, owner.id);
+      await expect(http(owner.token).get(`/boards/${board.id}`).expect(200)).resolves.toMatchObject({ body: { id: board.id, title: 'Untitled', role: 'OWNER' } });
+      await http(stranger.token).get(`/boards/${board.id}`).expect(404);
+    });
+
+    it('đổi tên: chỉ OWNER (EDITOR -> 403); người trong phòng (node khác) nhận BoardRenamed; tên rỗng -> 400', async () => {
+      const [owner, editor] = [await createUser(app), await createUser(app)];
+      const board = await createBoard(app, owner.id, [editor.id]);
+      const c = await connect(node2, editor.token);
+      await c.emitWithAck('JoinBoard', joinPayload(board.id));
+      const renamed = nextEvent(c, 'BoardRenamed');
+
+      const res = await http(owner.token).patch(`/boards/${board.id}`, { title: '  Roadmap Q4 ' }).expect(200);
+      expect(res.body).toMatchObject({ id: board.id, title: 'Roadmap Q4' });
+      await expect(renamed).resolves.toEqual({ title: 'Roadmap Q4' });
+      await http(editor.token).patch(`/boards/${board.id}`, { title: 'x' }).expect(403);
+      await http(owner.token).patch(`/boards/${board.id}`, { title: '   ' }).expect(400);
+      c.disconnect();
+    });
+
+    it('xóa: chỉ OWNER; người đang mở bảng bị đá (board_deleted); sau đó JoinBoard / GET / submitOps -> not found; dữ liệu còn trong DB', async () => {
+      const [owner, editor] = [await createUser(app), await createUser(app)];
+      const board = await createBoard(app, owner.id, [editor.id]);
+      await boards.submitOps(board.id, owner.id, [add()]);
+      const c = await connect(node2, editor.token);
+      await c.emitWithAck('JoinBoard', joinPayload(board.id));
+
+      await http(editor.token).delete(`/boards/${board.id}`).expect(403);
+      const kicked = Promise.all([nextEvent(c, 'AccessChanged'), nextEvent(c, 'disconnect')]);
+      await http(owner.token).delete(`/boards/${board.id}`).expect(204);
+      await expect(kicked).resolves.toEqual([{ reason: 'board_deleted' }, 'io server disconnect']);
+
+      const again = await connect(app, editor.token);
+      await expect(again.emitWithAck('JoinBoard', joinPayload(board.id))).resolves.toEqual({ ok: false, reason: 'not_found' });
+      again.disconnect();
+      await http(owner.token).get(`/boards/${board.id}`).expect(404);
+      await expect(boards.submitOps(board.id, owner.id, [add()])).rejects.toMatchObject({ code: 'BOARD_NOT_FOUND' });
+      expect(await prisma.element.count({ where: { boardId: board.id } })).toBe(1);
     });
   });
 });

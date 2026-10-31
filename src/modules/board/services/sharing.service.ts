@@ -58,7 +58,7 @@ export class SharingService {
     const role = board && roleOf(board);
     if (!board || !role) throw new AppError('BOARD_NOT_FOUND');
     if (!can(role, action)) throw new AppError('BOARD_FORBIDDEN');
-    return board;
+    return { ...board, role };
   }
 
   // --- Thành viên ---
