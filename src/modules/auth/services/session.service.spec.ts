@@ -1,6 +1,6 @@
 import type { ConfigService } from '@nestjs/config';
 import type { SessionRepository } from '../repositories/session.repository.js';
-import { sha256 } from '../utils/token.util.js';
+import { sha256 } from '../../../common/utils/token.util.js';
 import { SessionService } from './session.service.js';
 
 describe('SessionService', () => {

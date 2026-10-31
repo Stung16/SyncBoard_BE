@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import type { Socket } from 'socket.io-client';
 import { AppModule } from '../src/app.module.js';
 import { setupApp } from '../src/app.setup.js';
+import { PrismaService } from '../src/infra/database/prisma.service.js';
 import { SocketEmitter } from '../src/infra/socket/socket-emitter.service.js';
 import { BoardGateway } from '../src/modules/realtime/board.gateway.js';
 import { connect, createBoard, createUser, joinPayload, sleep } from './helpers.js';
@@ -64,6 +65,7 @@ describe('Nhiều server qua Redis adapter (e2e)', () => {
   it('presence qua 2 node: 1 tab ở A + 1 tab ở B cùng người, đóng tab ở B -> KHÔNG UserLeft; người ở A thấy cả 2 trong BoardState', async () => {
     const { user, boardId, onB } = await joinedOnB();
     const watcher = await createUser(nodeA);
+    await nodeA.get(PrismaService).boardMember.create({ data: { boardId, userId: watcher.id, role: 'EDITOR' } });
     const w = await open(nodeA, watcher.token);
     const state = new Promise<{ users: { userId: string }[] }>((r) => w.once('BoardState', r));
     await w.emitWithAck('JoinBoard', joinPayload(boardId));

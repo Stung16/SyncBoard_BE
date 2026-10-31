@@ -79,14 +79,14 @@ describe('Socket.IO gateway (e2e)', () => {
       const board = await createBoard(app, owner.id);
       const { ack, state } = await join(await open(owner.token), board.id);
       expect(ack).toEqual({ ok: true, role: 'OWNER' });
-      expect(state).toEqual({ lastSeq: 0, elements: [], users: [expect.objectContaining({ userId: owner.id, color: expect.any(String) })] });
+      expect(state).toEqual({ lastSeq: 0, elements: [], users: [expect.objectContaining({ userId: owner.id, color: expect.any(String) })], selections: [] });
     });
   });
 
   describe('vẽ chung', () => {
     it('A vẽ -> A và B cùng nhận OpsApplied; A nhận ack có seq; người vào sau (F5) thấy hình trong BoardState', async () => {
       const [ua, ub] = [await createUser(app), await createUser(app)];
-      const board = await createBoard(app, ua.id);
+      const board = await createBoard(app, ua.id, [ub.id]);
       const a = await open(ua.token);
       const b = await open(ub.token);
       await join(a, board.id);
@@ -110,7 +110,7 @@ describe('Socket.IO gateway (e2e)', () => {
 
     it('op bị từ chối: OpRejected chỉ tới người gửi, ack ghi lý do; B không nhận gì', async () => {
       const [ua, ub] = [await createUser(app), await createUser(app)];
-      const board = await createBoard(app, ua.id);
+      const board = await createBoard(app, ua.id, [ub.id]);
       const [a, b] = [await open(ua.token), await open(ub.token)];
       await join(a, board.id);
       await join(b, board.id);
@@ -130,7 +130,7 @@ describe('Socket.IO gateway (e2e)', () => {
 
     it('A rớt mạng, B vẽ 3 op, A nối lại với lastSeq -> nhận MissedOps đúng 3 op, KHÔNG nhận BoardState', async () => {
       const [ua, ub] = [await createUser(app), await createUser(app)];
-      const board = await createBoard(app, ua.id);
+      const board = await createBoard(app, ua.id, [ub.id]);
       const a = await open(ua.token);
       const b = await open(ub.token);
       await join(a, board.id);
@@ -155,7 +155,7 @@ describe('Socket.IO gateway (e2e)', () => {
 
     it('mất ack nên gửi lại cùng lô -> ack duplicates với seq cũ, B không nhận OpsApplied lần 2', async () => {
       const [ua, ub] = [await createUser(app), await createUser(app)];
-      const board = await createBoard(app, ua.id);
+      const board = await createBoard(app, ua.id, [ub.id]);
       const [a, b] = [await open(ua.token), await open(ub.token)];
       await join(a, board.id);
       await join(b, board.id);
@@ -180,7 +180,7 @@ describe('Socket.IO gateway (e2e)', () => {
   describe('rời phòng', () => {
     it('người có 2 tab đóng 1 tab -> KHÔNG UserLeft; đóng tab cuối -> UserLeft', async () => {
       const [ua, ub] = [await createUser(app), await createUser(app)];
-      const board = await createBoard(app, ua.id);
+      const board = await createBoard(app, ua.id, [ub.id]);
       const a = await open(ua.token);
       await join(a, board.id);
       const [tab1, tab2] = [await open(ub.token), await open(ub.token)];
@@ -200,7 +200,7 @@ describe('Socket.IO gateway (e2e)', () => {
 
     it('JoinBoard sang bảng khác: rời bảng cũ (UserLeft ở bảng cũ), không còn nhận OpsApplied của bảng cũ', async () => {
       const [ua, ub] = [await createUser(app), await createUser(app)];
-      const [b1, b2] = [await createBoard(app, ua.id), await createBoard(app, ub.id)];
+      const [b1, b2] = [await createBoard(app, ua.id, [ub.id]), await createBoard(app, ub.id)];
       const a = await open(ua.token);
       const b = await open(ub.token);
       await join(a, b1.id);

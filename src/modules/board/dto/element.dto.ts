@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 // --- Các mảnh dùng chung ---
 // z.number() của Zod 4 đã từ chối NaN và Infinity. Thêm min/max: số khổng lồ làm canvas vẽ sai và mất độ chính xác.
-const coord = z.number().min(-1e7).max(1e7);
+export const coord = z.number().min(-1e7).max(1e7);
 const size = z.number().min(0).max(1e7);
 const opacity = z.number().min(0).max(1);
 // Chỉ nhận màu hex (#rrggbb hoặc #rrggbbaa) hoặc 'transparent': chặn chuỗi rác/khổng lồ lọt vào DB rồi phát cho cả phòng.
@@ -43,7 +43,23 @@ export const elementDataSchemas = {
   rect: shapeData,
   ellipse: shapeData,
   diamond: shapeData,
-  // TODO GĐ1 (tự làm): text { x, y, width, text: max 10.000, fontSize, color, align }, sticky { x, y, width, height, text, color }
+  text: z.strictObject({
+    x: coord,
+    y: coord,
+    width: size,
+    text: z.string().max(10_000), // 8.3; chuỗi rỗng được (vừa tạo ô, chưa gõ)
+    fontSize: z.number().min(1).max(500),
+    color,
+    align: z.enum(['left', 'center', 'right']),
+  }),
+  sticky: z.strictObject({
+    x: coord,
+    y: coord,
+    width: size,
+    height: size,
+    text: z.string().max(10_000),
+    color,
+  }),
   // GĐ2: line/arrow, image, frame
 };
 export type ElementType = keyof typeof elementDataSchemas;
@@ -67,5 +83,7 @@ export const elementSchema = z.discriminatedUnion('type', [
     type: z.enum(['rect', 'ellipse', 'diamond']),
     data: shapeData,
   }),
+  z.strictObject({ ...base, type: z.literal('text'), data: elementDataSchemas.text }),
+  z.strictObject({ ...base, type: z.literal('sticky'), data: elementDataSchemas.sticky }),
 ]);
 export type ElementDto = z.infer<typeof elementSchema>;

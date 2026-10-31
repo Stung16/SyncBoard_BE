@@ -251,15 +251,4 @@ describe('Board (e2e)', () => {
       await expect(boards.getMissedOps(boardId, 1)).resolves.toHaveLength(1000);
     });
   });
-
-  describe('BoardService.resolveRole', () => {
-    it('OWNER theo board_members; người ngoài -> EDITOR (tạm, chưa có sharing); không có bảng -> null', async () => {
-      const owner = await createUser(app);
-      const stranger = await createUser(app);
-      const { id } = await createBoard(app, owner.id);
-      await expect(boards.resolveRole(id, owner.id)).resolves.toBe('OWNER');
-      await expect(boards.resolveRole(id, stranger.id)).resolves.toBe('EDITOR');
-      await expect(boards.resolveRole(randomUUID(), owner.id)).resolves.toBeNull();
-    });
-  });
 });

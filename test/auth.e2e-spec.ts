@@ -9,7 +9,7 @@ import { setupApp } from '../src/app.setup.js';
 import { PrismaService } from '../src/infra/database/prisma.service.js';
 import { MailService } from '../src/infra/mail/mail.service.js';
 import { REDIS, type RedisClient } from '../src/infra/redis/redis.module.js';
-import { sha256 } from '../src/modules/auth/utils/token.util.js';
+import { sha256 } from '../src/common/utils/token.util.js';
 
 describe('Auth (e2e)', () => {
   let app: INestApplication<App>;

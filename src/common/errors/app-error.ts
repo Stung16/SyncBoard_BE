@@ -39,6 +39,34 @@ export const ERRORS = {
     status: HttpStatus.NOT_FOUND,
     message: 'Bảng không tồn tại',
   },
+  BOARD_FORBIDDEN: {
+    status: HttpStatus.FORBIDDEN,
+    message: 'Bạn không có quyền làm việc này trên bảng',
+  },
+  MEMBER_NOT_FOUND: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'Thành viên không tồn tại',
+  },
+  OWNER_ROLE_FIXED: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'Không thể đổi vai trò hoặc xóa chủ bảng',
+  },
+  SHARE_LINK_NOT_FOUND: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'Link chia sẻ không tồn tại hoặc đã bị thu hồi',
+  },
+  INVITATION_NOT_FOUND: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'Lời mời không tồn tại hoặc đã bị thu hồi',
+  },
+  INVALID_INVITATION: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'Lời mời không hợp lệ hoặc đã hết hạn',
+  },
+  INVITATION_EMAIL_MISMATCH: {
+    status: HttpStatus.FORBIDDEN,
+    message: 'Lời mời này dành cho một email khác',
+  },
 } as const satisfies Record<string, { status: HttpStatus; message: string }>;
 
 export type ErrorCode = keyof typeof ERRORS;

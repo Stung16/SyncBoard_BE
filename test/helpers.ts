@@ -10,13 +10,13 @@ export async function createUser(app: INestApplication, opts: { expiresIn?: numb
     data: { email: `${randomUUID()}@e2e.test`, displayName: 'E2E', emailVerifiedAt: new Date() },
   });
   const token = await app.get(JwtService).signAsync({ sub: user.id }, opts.expiresIn ? { expiresIn: opts.expiresIn } : {});
-  return { id: user.id, token };
+  return { id: user.id, email: user.email, token };
 }
 
-export function createBoard(app: INestApplication, ownerId: string) {
-  return app.get(PrismaService).board.create({
-    data: { ownerId, members: { create: { userId: ownerId, role: 'OWNER' } } },
-  });
+// editorIds: thêm sẵn làm EDITOR (người không phải thành viên giờ không vào được bảng)
+export function createBoard(app: INestApplication, ownerId: string, editorIds: string[] = []) {
+  const members = [{ userId: ownerId, role: 'OWNER' as const }, ...editorIds.map((userId) => ({ userId, role: 'EDITOR' as const }))];
+  return app.get(PrismaService).board.create({ data: { ownerId, members: { create: members } } });
 }
 
 export async function connect(app: INestApplication, token?: string): Promise<Socket> {

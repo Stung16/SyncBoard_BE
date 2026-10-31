@@ -7,7 +7,7 @@ import type { Env } from '../../../config/env.validation.js';
 import { PrismaService } from '../../../infra/database/prisma.service.js';
 import { SessionRepository } from '../repositories/session.repository.js';
 import type { RequestMeta } from '../types/auth.types.js';
-import { randomToken, sha256 } from '../utils/token.util.js';
+import { randomToken, sha256 } from '../../../common/utils/token.util.js';
 
 const DAY_MS = 86_400_000;
 // 2 tab cùng refresh gần như cùng lúc: tab chậm gửi token vừa bị tab nhanh thay. Trong khoảng này không coi là bị đánh cắp.

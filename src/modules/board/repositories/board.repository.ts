@@ -21,7 +21,7 @@ export class BoardRepository {
   findWithMember(boardId: string, userId: string) {
     return this.prisma.board.findFirst({
       where: { id: boardId, deletedAt: null },
-      select: { members: { where: { userId }, select: { role: true } } },
+      select: { title: true, ownerId: true, members: { where: { userId }, select: { role: true } } },
     });
   }
 

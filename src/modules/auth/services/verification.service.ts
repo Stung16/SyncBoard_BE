@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../../generated/prisma/client.js';
 import type { VerificationTokenType } from '../../../generated/prisma/enums.js';
 import { VerificationTokenRepository } from '../repositories/verification-token.repository.js';
-import { randomToken, sha256 } from '../utils/token.util.js';
+import { randomToken, sha256 } from '../../../common/utils/token.util.js';
 import { AppError, type ErrorCode } from '../../../common/errors/app-error.js';
 
 // Mỗi loại token một câu báo lỗi; thêm loại mới vào enum mà quên dòng ở đây -> lỗi biên dịch.

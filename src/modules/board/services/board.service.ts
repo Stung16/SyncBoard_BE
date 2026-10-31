@@ -6,7 +6,6 @@ import { PrismaService } from '../../../infra/database/prisma.service.js';
 import { SocketEmitter } from '../../../infra/socket/socket-emitter.service.js';
 import { BoardLocks } from '../board-locks.js';
 import { applyOp, type AppliedOp, type ElementState, type RejectReason } from '../domain/apply-op.js';
-import type { Role } from '../domain/permissions.js';
 import type { ElementType } from '../dto/element.dto.js';
 import type { OpDto } from '../dto/op.dto.js';
 import { BoardRepository } from '../repositories/board.repository.js';
@@ -32,14 +31,6 @@ export class BoardService {
 
   create(ownerId: string, title?: string) {
     return this.boards.create(ownerId, title);
-  }
-
-  // Vai trò của user trong bảng; null = không có bảng.
-  async resolveRole(boardId: string, userId: string): Promise<Role | null> {
-    const board = await this.boards.findWithMember(boardId, userId);
-    if (!board) return null;
-    // shortcut: chưa có chia sẻ (GĐ4) -> ai đăng nhập + biết id bảng đều vào với quyền EDITOR. Làm sharing thì trả null ở đây.
-    return board.members[0]?.role ?? 'EDITOR';
   }
 
   // Ảnh chụp bảng cho người vừa vào. RepeatableRead: 2 câu đọc thấy CÙNG một thời điểm (last_seq khớp elements).

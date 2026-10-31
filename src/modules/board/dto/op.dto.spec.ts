@@ -207,3 +207,32 @@ describe('submitOpsSchema', () => {
     expect(submitOpsSchema.safeParse(raw).success).toBe(true);
   });
 });
+
+describe('element text / sticky', () => {
+  const textData = { x: 0, y: 0, width: 200, text: 'Xin chào', fontSize: 16, color: '#1e1e1e', align: 'left' };
+  const stickyData = { x: 0, y: 0, width: 150, height: 150, text: '', color: '#ffec99' };
+  const addEl = (type: string, data: Record<string, unknown>) => ({
+    ops: [{ type: 'add', opId: opId(), element: { id: 't1', type, data } }],
+  });
+
+  it.each([
+    ['text hợp lệ', addEl('text', textData)],
+    ['text rỗng (vừa tạo ô)', addEl('text', { ...textData, text: '' })],
+    ['text đủ 10.000 ký tự', addEl('text', { ...textData, text: 'a'.repeat(10_000) })],
+    ['sticky hợp lệ', addEl('sticky', stickyData)],
+  ])('nhận: %s', (_name, body) => {
+    expect(submitOpsSchema.safeParse(body).success).toBe(true);
+  });
+
+  it.each([
+    ['text 10.001 ký tự', addEl('text', { ...textData, text: 'a'.repeat(10_001) })],
+    ['align lạ', addEl('text', { ...textData, align: 'justify' })],
+    ['fontSize 0', addEl('text', { ...textData, fontSize: 0 })],
+    ['text thiếu fontSize', addEl('text', { x: 0, y: 0, width: 1, text: '', color: '#000000', align: 'left' })],
+    ['sticky có khóa lạ', addEl('sticky', { ...stickyData, fontSize: 12 })],
+    ['sticky màu rác', addEl('sticky', { ...stickyData, color: 'red; drop table' })],
+    ['dữ liệu text gắn type sticky', addEl('sticky', textData)],
+  ])('từ chối: %s', (_name, body) => {
+    expect(submitOpsSchema.safeParse(body).success).toBe(false);
+  });
+});

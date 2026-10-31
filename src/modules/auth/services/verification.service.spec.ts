@@ -1,5 +1,5 @@
 import type { VerificationTokenRepository } from '../repositories/verification-token.repository.js';
-import { sha256 } from '../utils/token.util.js';
+import { sha256 } from '../../../common/utils/token.util.js';
 import { VerificationService } from './verification.service.js';
 
 describe('VerificationService', () => {
