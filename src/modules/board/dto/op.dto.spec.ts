@@ -236,3 +236,46 @@ describe('element text / sticky', () => {
     expect(submitOpsSchema.safeParse(body).success).toBe(false);
   });
 });
+
+describe('element line / arrow / frame', () => {
+  const arrowData = {
+    x: 0,
+    y: 0,
+    points: [
+      [0, 0],
+      [100, 50],
+    ],
+    strokeColor: '#1e1e1e',
+    strokeWidth: 2,
+    strokeStyle: 'solid',
+    opacity: 1,
+    startBinding: { elementId: 'r1' },
+    endBinding: null,
+    arrowhead: 'arrow',
+  };
+  const frameData = { x: 0, y: 0, width: 800, height: 600, name: 'Sprint 12' };
+  const addEl = (type: string, data: Record<string, unknown>) => ({
+    ops: [{ type: 'add', opId: opId(), element: { id: 'l1', type, data } }],
+  });
+
+  it.each([
+    ['arrow dính vào hình ở đầu', addEl('arrow', arrowData)],
+    ['line không dính, không đầu mũi tên', addEl('line', { ...arrowData, startBinding: null, arrowhead: 'none' })],
+    ['frame', addEl('frame', frameData)],
+    ['frame tên rỗng', addEl('frame', { ...frameData, name: '' })],
+  ])('nhận: %s', (_name, body) => {
+    expect(submitOpsSchema.safeParse(body).success).toBe(true);
+  });
+
+  it.each([
+    ['arrow 1 điểm', addEl('arrow', { ...arrowData, points: [[0, 0]] })],
+    ['arrow thiếu endBinding (phải gửi null)', addEl('arrow', { ...arrowData, endBinding: undefined })],
+    ['binding có khóa lạ', addEl('arrow', { ...arrowData, startBinding: { elementId: 'r1', x: 1 } })],
+    ['binding là chuỗi', addEl('arrow', { ...arrowData, startBinding: 'r1' })],
+    ['arrowhead lạ', addEl('arrow', { ...arrowData, arrowhead: 'heart' })],
+    ['frame tên 101 ký tự', addEl('frame', { ...frameData, name: 'x'.repeat(101) })],
+    ['frame thiếu height', addEl('frame', { x: 0, y: 0, width: 1, name: '' })],
+  ])('từ chối: %s', (_name, body) => {
+    expect(submitOpsSchema.safeParse(body).success).toBe(false);
+  });
+});

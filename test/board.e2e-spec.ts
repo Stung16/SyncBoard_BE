@@ -12,7 +12,7 @@ import { BoardService } from '../src/modules/board/services/board.service.js';
 import { createBoard, createUser } from './helpers.js';
 
 const RECT = { x: 0, y: 0, width: 10, height: 10, angle: 0, strokeColor: '#000000', fillColor: 'transparent', strokeWidth: 1, strokeStyle: 'solid', opacity: 1 };
-const add = (id = randomUUID()): OpDto => ({ opId: randomUUID(), type: 'add', element: { id, type: 'rect', data: RECT } }) as OpDto;
+const add = (id: string = randomUUID()): OpDto => ({ opId: randomUUID(), type: 'add', element: { id, type: 'rect', data: RECT } }) as OpDto;
 const update = (elementId: string, patch: Record<string, unknown>, baseVersion = 1): OpDto => ({ opId: randomUUID(), type: 'update', elementId, baseVersion, patch });
 
 async function startNode() {
@@ -249,6 +249,79 @@ describe('Board (e2e)', () => {
       await prisma.board.update({ where: { id: boardId }, data: { lastSeq: 1001 } });
       await expect(boards.getMissedOps(boardId, 0)).resolves.toBeNull();
       await expect(boards.getMissedOps(boardId, 1)).resolves.toHaveLength(1000);
+    });
+  });
+
+  describe('reorder + undo clear', () => {
+    let userId: string;
+    let boardId: string;
+    const reorder = (elementId: string, position: 'front' | 'back' | 'forward' | 'backward'): OpDto => ({ opId: randomUUID(), type: 'reorder', elementId, position });
+    const order = async () => (await boards.getState(boardId)).elements.map((e) => e.id);
+    beforeEach(async () => {
+      userId = (await createUser(app)).id;
+      boardId = (await createBoard(app, userId)).id;
+      await boards.submitOps(boardId, userId, ['A', 'B', 'C', 'D'].map((id) => add(id))); // dưới -> trên: A B C D
+    });
+
+    it('front / back / forward / backward đổi đúng thứ tự; payload OpsApplied mang zIndex đã tính', async () => {
+      const res = await boards.submitOps(boardId, userId, [reorder('A', 'front')]);
+      expect(res.applied[0]).toMatchObject({ type: 'reorder', element: { id: 'A', zIndex: expect.any(String), version: 2 } });
+      expect(await order()).toEqual(['B', 'C', 'D', 'A']);
+      await boards.submitOps(boardId, userId, [reorder('D', 'back')]);
+      expect(await order()).toEqual(['D', 'B', 'C', 'A']);
+      await boards.submitOps(boardId, userId, [reorder('B', 'forward')]);
+      expect(await order()).toEqual(['D', 'C', 'B', 'A']);
+      await boards.submitOps(boardId, userId, [reorder('B', 'backward'), reorder('B', 'backward')]); // 2 op cùng lô: op sau thấy op trước
+      expect(await order()).toEqual(['B', 'D', 'C', 'A']);
+    });
+
+    it('forward nhảy qua element đã xóa (không tốn một lượt bấm vô hình); khóa mới không trùng khóa của element đã xóa', async () => {
+      await boards.submitOps(boardId, userId, [{ opId: randomUUID(), type: 'delete', elementId: 'B' }]); // còn A C D
+      await boards.submitOps(boardId, userId, [reorder('A', 'forward')]);
+      expect(await order()).toEqual(['C', 'A', 'D']);
+      await boards.submitOps(boardId, userId, [{ opId: randomUUID(), type: 'restore', elementId: 'B' }]);
+      const z = (await boards.getState(boardId)).elements.map((e) => e.zIndex);
+      expect(new Set(z).size).toBe(4);
+    });
+
+    it('đã trên cùng mà front -> no_change; element khóa / đã xóa -> locked / deleted; add sau reorder front trong cùng lô vẫn nằm trên', async () => {
+      const res = await boards.submitOps(boardId, userId, [reorder('D', 'front'), reorder('A', 'back')]);
+      expect(res.rejected.map((r) => r.reason)).toEqual(['no_change', 'no_change']);
+      await boards.submitOps(boardId, userId, [update('C', { locked: true }), { opId: randomUUID(), type: 'delete', elementId: 'B' }]);
+      const res2 = await boards.submitOps(boardId, userId, [reorder('C', 'front'), reorder('B', 'front')]);
+      expect(res2.rejected.map((r) => r.reason)).toEqual(['locked', 'deleted']);
+
+      await boards.submitOps(boardId, userId, [reorder('A', 'front'), add('E')]);
+      expect((await order()).slice(-2)).toEqual(['A', 'E']);
+    });
+
+    it('undo clear (restore { clearSeq }): bật lại đúng những hình bị clear, gửi kèm đủ element; hình vẽ sau clear không ảnh hưởng; undo lần 2 -> not_deleted', async () => {
+      const cleared = await boards.submitOps(boardId, userId, [{ opId: randomUUID(), type: 'clear' }]);
+      const clearSeq = cleared.applied[0]!.seq;
+      await boards.submitOps(boardId, userId, [add('after')]);
+
+      const res = await boards.submitOps(boardId, userId, [{ opId: randomUUID(), type: 'restore', clearSeq }]);
+      expect(res.applied).toHaveLength(1);
+      const applied = res.applied[0] as { type: string; clearSeq: number; elements: { id: string; version: number }[] };
+      expect(applied).toMatchObject({ type: 'restore', clearSeq });
+      expect(applied.elements.map((e) => e.id).sort()).toEqual(['A', 'B', 'C', 'D']);
+      expect(applied.elements.every((e) => e.version === 3)).toBe(true); // add 1, clear 2, restore 3
+      expect(await order()).toEqual(['A', 'B', 'C', 'D', 'after']);
+
+      // phát lại MissedOps đúng y OpsApplied
+      const missed = await boards.getMissedOps(boardId, clearSeq + 1);
+      expect(missed).toEqual([expect.objectContaining({ type: 'restore', clearSeq, elements: expect.any(Array) })]);
+
+      const again = await boards.submitOps(boardId, userId, [{ opId: randomUUID(), type: 'restore', clearSeq }]);
+      expect(again.rejected).toEqual([expect.objectContaining({ reason: 'not_deleted' })]);
+    });
+
+    it('clearSeq không phải op clear / không tồn tại -> not_found', async () => {
+      const res = await boards.submitOps(boardId, userId, [
+        { opId: randomUUID(), type: 'restore', clearSeq: 1 }, // seq 1 là add
+        { opId: randomUUID(), type: 'restore', clearSeq: 999 },
+      ]);
+      expect(res.rejected.map((r) => r.reason)).toEqual(['not_found', 'not_found']);
     });
   });
 });

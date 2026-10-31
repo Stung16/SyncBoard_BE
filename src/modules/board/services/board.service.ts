@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { generateKeyBetween } from 'fractional-indexing';
 import { AppError } from '../../../common/errors/app-error.js';
-import type { Element, Operation } from '../../../generated/prisma/client.js';
+import type { Element, Operation, Prisma } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../infra/database/prisma.service.js';
 import { SocketEmitter } from '../../../infra/socket/socket-emitter.service.js';
 import { BoardLocks } from '../board-locks.js';
 import { applyOp, type AppliedOp, type ElementState, type RejectReason } from '../domain/apply-op.js';
+import { reorderZIndex, type ReorderPosition } from '../domain/z-index.js';
 import type { ElementType } from '../dto/element.dto.js';
 import type { OpDto } from '../dto/op.dto.js';
 import { BoardRepository } from '../repositories/board.repository.js';
@@ -95,16 +96,34 @@ export class BoardService {
             const ctx = { actor, zIndexFor: () => (top = generateKeyBetween(top, null)) }; // mỗi add mới nằm trên cùng
 
             for (const op of fresh) {
+              // Undo xóa sạch bảng: không gắn với một element -> service tự xử lý, không qua applyOp
+              if (op.type === 'restore' && op.clearSeq !== undefined) {
+                const restored = await this.undoClear(boardId, actor, op.clearSeq, tx);
+                if (typeof restored === 'string') {
+                  rejected.push({ opId: op.opId, reason: restored });
+                  continue;
+                }
+                for (const e of restored) state.set(e.id, e);
+                applied.push({ opId: op.opId, seq: nextSeq(), type: 'restore', clearSeq: op.clearSeq, elements: restored });
+                continue;
+              }
+
               const id = targetId(op);
               const current = id === undefined ? undefined : state.get(id);
-              const r = applyOp(current, op, ctx);
+              // reorder: zIndex mới tính từ hàng xóm đọc TRONG tx (thấy cả op trước trong lô). Không hợp lệ thì để domain từ chối.
+              const reorderTo =
+                op.type === 'reorder' && current && !current.isDeleted && !current.locked
+                  ? await this.reorderTarget(boardId, current.zIndex, op.position, tx)
+                  : null;
+              const r = applyOp(current, op, { ...ctx, reorderTo });
               if (!r.ok) {
                 rejected.push({ opId: op.opId, reason: r.reason, current }); // kèm current để client sửa lại màn hình
                 continue; // op hỏng KHÔNG chặn op khác trong lô
               }
               await (current ? this.elements.update(boardId, r.next, tx) : this.elements.create(boardId, r.next, tx));
               state.set(r.next.id, r.next); // op sau trong cùng lô thấy kết quả của op trước
-              applied.push({ opId: op.opId, seq: nextSeq(), type: op.type as 'add' | 'update' | 'delete' | 'restore', element: r.next });
+              if (top === null || r.next.zIndex > top) top = r.next.zIndex; // reorder front giữa lô -> add sau vẫn nằm trên nó
+              applied.push({ opId: op.opId, seq: nextSeq(), type: op.type as 'add' | 'update' | 'delete' | 'restore' | 'reorder', element: r.next });
             }
           }
 
@@ -121,6 +140,29 @@ export class BoardService {
       if (result.applied.length > 0) this.emitter.toBoard(boardId, 'OpsApplied', result.applied);
       return result;
     });
+  }
+
+  // null = không đổi (đã ở đầu đó). Xem domain/z-index.ts để biết near/far là gì.
+  private async reorderTarget(boardId: string, z: string, position: ReorderPosition, tx: Prisma.TransactionClient) {
+    const dir = position === 'front' || position === 'forward' ? 'up' : 'down';
+    const near = await this.elements.nearestZIndex(boardId, z, dir, true, tx);
+    if (near === null) return null;
+    const far =
+      position === 'front'
+        ? await this.elements.maxZIndex(boardId, tx)
+        : position === 'back'
+          ? await this.elements.minZIndex(boardId, tx)
+          : await this.elements.nearestZIndex(boardId, near, dir, false, tx);
+    return reorderZIndex(position, { near, far });
+  }
+
+  // UC 1.7: đọc danh sách id trong payload của op clear (client không gửi danh sách: 50.000 id vượt giới hạn tin).
+  private async undoClear(boardId: string, actor: string, clearSeq: number, tx: Prisma.TransactionClient): Promise<ElementState[] | RejectReason> {
+    const row = await this.operations.findBySeq(boardId, clearSeq, tx);
+    if (row?.type !== 'clear') return 'not_found'; // seq sai, không phải clear, hoặc op đã bị dọn (> 30 ngày)
+    const { clearedIds } = row.payload as { clearedIds: string[] };
+    const restored = (await this.elements.restoreMany(boardId, clearedIds, actor, tx)).map(toState);
+    return restored.length > 0 ? restored : 'not_deleted'; // undo lần 2 -> không còn gì để bật lại
   }
 }
 

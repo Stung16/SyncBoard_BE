@@ -244,22 +244,30 @@ describe('applyOp: restore', () => {
   });
 });
 
-describe('applyOp: op domain không xử lý', () => {
+describe('applyOp: reorder', () => {
+  const reorder = { type: 'reorder', opId: opId(), elementId: 'r1', position: 'front' } as const;
+  const withZ = (cur: ElementState | undefined, reorderTo: string | null) => applyOp(cur, reorder, { ...ctx, reorderTo });
+
+  it('đặt zIndex service đã tính, version + 1, KHÔNG đổi data; không mutate current', () => {
+    const cur = rect();
+    const before = structuredClone(cur);
+    const r = withZ(cur, 'a5');
+    expect(r).toMatchObject({ ok: true, next: { zIndex: 'a5', version: 4, updatedBy: 'u1', data: RECT_DATA } });
+    expect(cur).toEqual(before);
+  });
+
   it.each([
-    [
-      'reorder (GĐ2)',
-      {
-        type: 'reorder',
-        opId: opId(),
-        elementId: 'r1',
-        position: 'front',
-      } as const,
-    ],
-    [
-      'clear (service chạy updateMany)',
-      { type: 'clear', opId: opId() } as const,
-    ],
-  ])('%s -> unsupported_op', (_, op) =>
-    expect(reasonOf(rect(), op)).toBe('unsupported_op'),
-  );
+    ['không tồn tại', undefined, 'not_found'],
+    ['đã xóa', rect({ isDeleted: true }), 'deleted'],
+    ['đang khóa', rect({ locked: true }), 'locked'],
+    ['đã ở trên cùng (service trả null)', rect(), 'no_change'],
+  ])('%s -> %s', (_, cur, reason) => {
+    const r = withZ(cur, null);
+    expect(r.ok ? 'ok' : r.reason).toBe(reason);
+  });
+});
+
+describe('applyOp: op domain không xử lý', () => {
+  it('clear (service chạy updateMany) -> unsupported_op', () =>
+    expect(reasonOf(rect(), { type: 'clear', opId: opId() })).toBe('unsupported_op'));
 });

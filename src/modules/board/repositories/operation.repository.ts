@@ -35,6 +35,10 @@ export class OperationRepository {
     return db.operation.findMany({ where: { boardId, seq: { gt: seq } }, orderBy: { seq: 'asc' }, take });
   }
 
+  findBySeq(boardId: string, seq: number, db: Db) {
+    return db.operation.findUnique({ where: { boardId_seq: { boardId, seq } } });
+  }
+
   // Op restore_snapshot: không phải AppliedOp (không phát lại được từng bước) -> ghi riêng
   createRestore(boardId: string, seq: number, actor: string, snapshotId: string, db: Db) {
     return db.operation.create({

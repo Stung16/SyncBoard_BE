@@ -22,8 +22,10 @@ export type ElementState = {
 
 // Một op server đã nhận + kết quả CUỐI (do server quyết). Phát trong OpsApplied, lưu ở operations.payload, phát lại trong MissedOps.
 export type AppliedOp =
-  | { opId: string; seq: number; type: 'add' | 'update' | 'delete' | 'restore'; element: ElementState }
-  | { opId: string; seq: number; type: 'clear'; clearedIds: string[] };
+  | { opId: string; seq: number; type: 'add' | 'update' | 'delete' | 'restore' | 'reorder'; element: ElementState }
+  | { opId: string; seq: number; type: 'clear'; clearedIds: string[] }
+  // undo xóa sạch bảng: gửi lại đủ element (người vào sau lần clear không có chúng trong máy)
+  | { opId: string; seq: number; type: 'restore'; clearSeq: number; elements: ElementState[] };
 
 export type RejectReason =
   | 'already_exists'
@@ -35,6 +37,7 @@ export type RejectReason =
   | 'empty_patch'
   | 'invalid_patch'
   | 'invalid_data'
+  | 'no_change' // reorder khi đã ở trên cùng / dưới cùng
   | 'unsupported_op';
 
 export type ApplyResult =
@@ -43,7 +46,8 @@ export type ApplyResult =
 
 export type ApplyCtx = {
   actor: string; // userId người gửi -> updatedBy
-  zIndexFor: () => string; // service tính zIndex "trên cùng" (GĐ1); domain không tự tính
+  zIndexFor: () => string; // service tính zIndex "trên cùng" cho add; domain không tự tính
+  reorderTo?: string | null; // reorder: zIndex mới service đã tính từ hàng xóm (domain/z-index.ts); null = không đổi
 };
 
 // Patch được phép đụng 3 cột meta này; còn lại phải là trường của data.
@@ -117,7 +121,7 @@ export function applyOp(
         next: bump(current, ctx, { isDeleted: true }),
       };
     case 'restore':
-      if (op.elementId === undefined) return reject('unsupported_op'); // restore { clearSeq } do service xử lý (GĐ3)
+      if (op.elementId === undefined) return reject('unsupported_op'); // restore { clearSeq }: BoardService.undoClear xử lý
       if (!current) return reject('not_found');
       if (!current.isDeleted) return reject('not_deleted'); // client undo gặp lý do này thì bỏ qua lượt
       return {
@@ -125,8 +129,14 @@ export function applyOp(
         stale: false,
         next: bump(current, ctx, { isDeleted: false }),
       };
+    case 'reorder':
+      if (!current) return reject('not_found');
+      if (current.isDeleted) return reject('deleted');
+      if (current.locked) return reject('locked');
+      if (!ctx.reorderTo) return reject('no_change');
+      return { ok: true, stale: false, next: bump(current, ctx, { zIndex: ctx.reorderTo }) }; // payload mang zIndex đã tính, không phải chữ "front"
     default:
-      return reject('unsupported_op'); // reorder (GĐ2), clear (service chạy updateMany)
+      return reject('unsupported_op'); // clear (service chạy updateMany)
   }
 }
 

@@ -28,6 +28,22 @@ const shapeData = z.strictObject({
   opacity,
 });
 
+// line / arrow: points tương đối với (x, y) như freedraw, ít nhất 2 điểm.
+// binding = id hình mà đầu đó dính vào (2.11); client tự tính vị trí đầu mũi tên từ hình đó. null = không dính.
+const binding = z.strictObject({ elementId }).nullable();
+const linearData = z.strictObject({
+  x: coord,
+  y: coord,
+  points: z.array(z.tuple([coord, coord])).min(2).max(5000),
+  strokeColor: color,
+  strokeWidth: z.number().min(0.5).max(100),
+  strokeStyle: z.enum(['solid', 'dashed']),
+  opacity,
+  startBinding: binding,
+  endBinding: binding,
+  arrowhead: z.enum(['none', 'arrow', 'triangle']), // ở điểm cuối; line thường để 'none'
+});
+
 export const elementDataSchemas = {
   freedraw: z.strictObject({
     x: coord,
@@ -60,7 +76,10 @@ export const elementDataSchemas = {
     text: z.string().max(10_000),
     color,
   }),
-  // GĐ2: line/arrow, image, frame
+  line: linearData,
+  arrow: linearData,
+  frame: z.strictObject({ x: coord, y: coord, width: size, height: size, name: z.string().max(100) }), // 5.7
+  // image: thêm cùng upload asset
 };
 export type ElementType = keyof typeof elementDataSchemas;
 
@@ -83,6 +102,8 @@ export const elementSchema = z.discriminatedUnion('type', [
     type: z.enum(['rect', 'ellipse', 'diamond']),
     data: shapeData,
   }),
+  z.strictObject({ ...base, type: z.enum(['line', 'arrow']), data: linearData }),
+  z.strictObject({ ...base, type: z.literal('frame'), data: elementDataSchemas.frame }),
   z.strictObject({ ...base, type: z.literal('text'), data: elementDataSchemas.text }),
   z.strictObject({ ...base, type: z.literal('sticky'), data: elementDataSchemas.sticky }),
 ]);

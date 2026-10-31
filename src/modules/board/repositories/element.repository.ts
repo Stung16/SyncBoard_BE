@@ -25,6 +25,31 @@ export class ElementRepository {
     return rows[0]?.z ?? null;
   }
 
+  async minZIndex(boardId: string, db: Db) {
+    const rows = await db.$queryRaw<{ z: string | null }[]>`
+      SELECT min(z_index COLLATE "C") AS z FROM elements WHERE board_id = ${boardId}::uuid`;
+    return rows[0]?.z ?? null;
+  }
+
+  // zIndex gần nhất phía trên ('up') / dưới ('down') của z. visibleOnly: chỉ tính element chưa xóa.
+  // So sánh + sắp xếp chạy trên cột COLLATE "C" -> đúng thứ tự byte như fractional-indexing.
+  async nearestZIndex(boardId: string, z: string, dir: 'up' | 'down', visibleOnly: boolean, db: Db) {
+    const row = await db.element.findFirst({
+      where: { boardId, zIndex: dir === 'up' ? { gt: z } : { lt: z }, ...(visibleOnly && { isDeleted: false }) },
+      orderBy: { zIndex: dir === 'up' ? 'asc' : 'desc' },
+      select: { zIndex: true },
+    });
+    return row?.zIndex ?? null;
+  }
+
+  // Undo clear: bật lại những id vẫn còn bị xóa (cái nào đã được restore lẻ hoặc vẽ lại thì bỏ qua)
+  restoreMany(boardId: string, ids: string[], actor: string, db: Db) {
+    return db.element.updateManyAndReturn({
+      where: { boardId, id: { in: ids }, isDeleted: true },
+      data: { isDeleted: false, version: { increment: 1 }, updatedBy: actor },
+    });
+  }
+
   create(boardId: string, el: ElementState, db: Db) {
     return db.element.create({ data: { boardId, ...columns(el) } });
   }
