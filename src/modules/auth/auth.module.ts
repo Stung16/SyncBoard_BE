@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import type { Env } from '../../config/env.validation.js';
 import { REDIS, type RedisClient } from '../../infra/redis/redis.module.js';
+import { AuditModule } from '../audit/audit.module.js';
 import { UserModule } from '../user/user.module.js';
 import { AuthController } from './controllers/auth.controller.js';
 import { MeController } from './controllers/me.controller.js';
@@ -20,6 +21,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
 @Module({
   imports: [
     UserModule,
+    AuditModule,
     PassportModule.register({ session: false }), // stateless: không dùng express-session
     JwtModule.registerAsync({
       global: true, // gateway cũng dùng JwtService để xác thực socket

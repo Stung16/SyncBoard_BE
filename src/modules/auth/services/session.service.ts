@@ -5,6 +5,7 @@ import { AppError } from '../../../common/errors/app-error.js';
 import type { Prisma } from '../../../generated/prisma/client.js';
 import type { Env } from '../../../config/env.validation.js';
 import { PrismaService } from '../../../infra/database/prisma.service.js';
+import { AuditService } from '../../audit/services/audit.service.js';
 import { SessionRepository } from '../repositories/session.repository.js';
 import type { RequestMeta } from '../types/auth.types.js';
 import { randomToken, sha256 } from '../../../common/utils/token.util.js';
@@ -19,6 +20,7 @@ export class SessionService {
     private readonly sessions: SessionRepository,
     private readonly config: ConfigService<Env, true>,
     private readonly prisma: PrismaService, // chỉ để mở transaction; query nằm ở repository
+    private readonly audit: AuditService,
   ) {}
 
   get refreshTtlMs() {
@@ -41,7 +43,10 @@ export class SessionService {
       const stolen =
         current.replacedById &&
         Date.now() - current.revokedAt.getTime() > REUSE_GRACE_MS;
-      if (stolen) await this.sessions.revokeFamily(current.familyId);
+      if (stolen) {
+        await this.sessions.revokeFamily(current.familyId);
+        await this.audit.record({ action: 'auth.session_reuse', actorId: current.userId, metadata: { familyId: current.familyId } });
+      }
       throw new AppError('INVALID_REFRESH_TOKEN'); // còn lại: đã logout, hoặc tab khác vừa xoay trước
     }
     if (current.expiresAt <= new Date())

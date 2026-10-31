@@ -12,3 +12,6 @@ export type RenameBoardDto = z.infer<typeof renameBoardSchema>;
 // GET /boards?search=: tìm theo tên, không phân biệt hoa thường. Rỗng = tất cả.
 export const listBoardsSchema = z.strictObject({ search: z.string().trim().max(50).optional() });
 export type ListBoardsDto = z.infer<typeof listBoardsSchema>;
+
+export const auditLogQuerySchema = z.strictObject({ before: z.uuid().optional() });
+export type AuditLogQueryDto = z.infer<typeof auditLogQuerySchema>;

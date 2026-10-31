@@ -10,6 +10,7 @@ import { ElementRepository } from '../repositories/element.repository.js';
 import { OperationRepository } from '../repositories/operation.repository.js';
 import { SnapshotRepository } from '../repositories/snapshot.repository.js';
 import { BoardService, toState } from './board.service.js';
+import { AuditService } from '../../audit/services/audit.service.js';
 import { SharingService } from './sharing.service.js';
 
 // Định dạng nội dung một bản chụp; trùng định dạng export (7.2) để sau này dùng lại.
@@ -33,6 +34,7 @@ export class SnapshotService {
     private readonly sharing: SharingService,
     private readonly locks: BoardLocks,
     private readonly emitter: SocketEmitter,
+    private readonly audit: AuditService,
   ) {}
 
   async list(boardId: string, userId: string) {
@@ -66,7 +68,7 @@ export class SnapshotService {
   // 6.5: thay cả bảng bằng bản chụp. Trong BoardLocks + FOR UPDATE như submitOps: không op nào chen giữa.
   async restore(boardId: string, userId: string, snapshotId: string) {
     await this.sharing.authorize(boardId, userId, 'clearOrRestoreVersion');
-    return this.locks.run(boardId, async () => {
+    const result = await this.locks.run(boardId, async () => {
       const seq = await this.prisma.$transaction(
         async (tx) => {
           const lastSeq = await this.boards.lockForUpdate(boardId, tx);
@@ -94,5 +96,7 @@ export class SnapshotService {
       this.emitter.toBoard(boardId, 'BoardReset', { seq });
       return { seq };
     });
+    await this.audit.record({ action: 'snapshot.restore', actorId: userId, boardId, metadata: { snapshotId, seq: result.seq } });
+    return result;
   }
 }

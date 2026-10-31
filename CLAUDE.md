@@ -18,7 +18,7 @@ The whole build order in `docs/research/implementation-guide.md` (GĐ1–GĐ5) i
   - graceful shutdown
   - comments with mentions and notifications (room `user:{id}`)
 
-Not built yet (in the spec, outside the build order): stamp (5.4), shared timer (5.6), templates (5.9), export/import (7.2), `audit_logs` writes. Documents are written in Vietnamese; keep that language when editing them.
+Not built yet (in the spec, outside the build order): stamp (5.4), shared timer (5.6), templates (5.9), export/import (7.2). Documents are written in Vietnamese; keep that language when editing them.
 
 ## Commands
 

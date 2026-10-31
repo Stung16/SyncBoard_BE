@@ -14,10 +14,12 @@ describe('SessionService', () => {
   };
   const config = { get: vi.fn(() => 30) }; // REFRESH_TTL_DAYS
   const prisma = { $transaction: vi.fn((fn: (t: unknown) => unknown) => fn(tx)) };
+  const audit = { record: vi.fn() };
   const service = new SessionService(
     repo as unknown as SessionRepository,
     config as unknown as ConfigService<never, true>,
     prisma as never,
+    audit as never,
   );
   const active = { id: 'old-id', userId: 'u1', familyId: 'f1', revokedAt: null, replacedById: null, expiresAt: new Date(Date.now() + 60_000) };
 
@@ -66,12 +68,14 @@ describe('SessionService', () => {
       await expect(service.rotate('t', {})).rejects.toMatchObject({ code: 'INVALID_REFRESH_TOKEN', status: 401 });
       expect(repo.create).not.toHaveBeenCalled();
       expect(repo.revokeFamily).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
     });
 
     it('token đã bị thay từ lâu mà vẫn dùng (bị đánh cắp) -> thu hồi cả family NGOÀI transaction rồi mới ném', async () => {
       repo.findByTokenHash.mockResolvedValueOnce({ ...active, revokedAt: new Date(Date.now() - 60_000), replacedById: 'x' });
       await expect(service.rotate('t', {})).rejects.toMatchObject({ code: 'INVALID_REFRESH_TOKEN' });
       expect(repo.revokeFamily).toHaveBeenCalledWith('f1');
+      expect(audit.record).toHaveBeenCalledWith({ action: 'auth.session_reuse', actorId: 'u1', metadata: { familyId: 'f1' } });
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 

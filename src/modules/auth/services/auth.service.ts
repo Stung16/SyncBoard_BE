@@ -6,6 +6,7 @@ import { AppError } from '../../../common/errors/app-error.js';
 import { Prisma } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../infra/database/prisma.service.js';
 import { REDIS, type RedisClient } from '../../../infra/redis/redis.module.js';
+import { AuditService } from '../../audit/services/audit.service.js';
 import { UserService } from '../../user/services/user.service.js';
 import type { RegisterDto } from '../dto/register.dto.js';
 import {
@@ -39,6 +40,7 @@ export class AuthService {
     private readonly events: EventEmitter2,
     private readonly jwt: JwtService,
     @Inject(REDIS) private readonly redis: RedisClient,
+    private readonly audit: AuditService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -68,6 +70,7 @@ export class AuthService {
         throw e;
       });
 
+    await this.audit.record({ action: 'auth.register', actorId: user.id });
     this.events.emit(USER_REGISTERED, {
       userId: user.id,
       email: user.email,
@@ -106,8 +109,11 @@ export class AuthService {
       user.deletedAt ||
       !user.passwordHash ||
       !(await verify(user.passwordHash, password))
-    )
+    ) {
+      // Dò mật khẩu hàng loạt hiện ra ở đây (cùng email, nhiều IP / cùng IP, nhiều email). email đã chuẩn hóa ở DTO.
+      await this.audit.record({ action: 'auth.login_failed', actorId: user?.id ?? null, metadata: { email } });
       throw new AppError('INVALID_CREDENTIALS');
+    }
     if (!user.emailVerifiedAt) throw new AppError('EMAIL_NOT_VERIFIED');
     const { passwordHash: _passwordHash, ...safeUser } = user;
     return { ...(await this.issueTokens(user.id, meta)), user: safeUser };
@@ -165,7 +171,7 @@ export class AuthService {
   async resetPassword(token: string, password: string) {
     const passwordHash = await hash(password); // băm NGOÀI transaction, như register
 
-    await this.prisma
+    const userId = await this.prisma
       .$transaction(async (tx) => {
         const userId = await this.verification.consume(
           token,
@@ -178,6 +184,7 @@ export class AuthService {
           await this.users.markEmailVerified(userId, tx);
         // Mật khẩu cũ có thể đã lộ: đá mọi thiết bị ra (refresh token cũ hết dùng được).
         await this.sessions.revokeAll(userId, tx);
+        return userId;
       })
       .catch((e: unknown) => {
         if (
@@ -187,6 +194,7 @@ export class AuthService {
           throw new AppError('INVALID_RESET_TOKEN'); // tài khoản đã xóa mềm
         throw e;
       });
+    await this.audit.record({ action: 'auth.password_reset', actorId: userId });
   }
 
   // 1 lần / 60s / key. Redis chứ không phải Map: nhiều node thì mỗi Map đếm riêng. NX = chỉ đặt khi chưa có key.
@@ -211,6 +219,7 @@ export class AuthService {
   async issueTokens(userId: string, meta: RequestMeta): Promise<TokenPair> {
     const accessToken = await this.jwt.signAsync({ sub: userId }); // hạn lấy từ JwtModule (JWT_ACCESS_TTL_SECONDS)
     const refreshToken = await this.sessions.create(userId, meta);
+    await this.audit.record({ action: 'auth.login', actorId: userId }); // mọi cách đăng nhập (mật khẩu, xác minh email, Google) đều qua đây
     return { accessToken, refreshToken };
   }
 }

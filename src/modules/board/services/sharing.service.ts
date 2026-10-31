@@ -4,6 +4,7 @@ import { AppError } from '../../../common/errors/app-error.js';
 import { randomToken, sha256 } from '../../../common/utils/token.util.js';
 import { PrismaService } from '../../../infra/database/prisma.service.js';
 import { SocketEmitter } from '../../../infra/socket/socket-emitter.service.js';
+import { AuditService } from '../../audit/services/audit.service.js';
 import { UserService } from '../../user/services/user.service.js';
 import { can, type Action, type Role } from '../domain/permissions.js';
 import type { ChangeRoleDto, CreateInvitationDto, CreateShareLinkDto } from '../dto/sharing.dto.js';
@@ -35,6 +36,7 @@ export class SharingService {
     private readonly users: UserService,
     private readonly emitter: SocketEmitter,
     private readonly events: EventEmitter2,
+    private readonly audit: AuditService,
   ) {}
 
   // null = không có bảng HOẶC không có quyền: trả giống nhau để người lạ không dò được id bảng nào tồn tại.
@@ -78,6 +80,7 @@ export class SharingService {
     const current = await this.requireNonOwnerMember(boardId, userId);
     if (current.role === role) return { userId, role };
     const updated = await this.members.updateRole(boardId, userId, role);
+    await this.audit.record({ action: 'member.role_change', actorId, boardId, metadata: { userId, from: current.role, to: role } });
     // Không sửa role trong socket.data được (socket có thể ở node khác) -> đá ra, client JoinBoard lại để nhận vai trò mới
     this.emitter.kickFromBoard(memberRoom(boardId, userId), 'role_changed');
     return updated;
@@ -85,8 +88,9 @@ export class SharingService {
 
   async removeMember(boardId: string, actorId: string, userId: string) {
     await this.requireOwner(boardId, actorId);
-    await this.requireNonOwnerMember(boardId, userId);
+    const { role } = await this.requireNonOwnerMember(boardId, userId);
     await this.members.delete(boardId, userId);
+    await this.audit.record({ action: 'member.remove', actorId, boardId, metadata: { userId, role } });
     this.emitter.kickFromBoard(memberRoom(boardId, userId), 'removed');
   }
 
@@ -95,7 +99,10 @@ export class SharingService {
   async createLink(boardId: string, actorId: string, { role, expiresInHours }: CreateShareLinkDto) {
     await this.requireOwner(boardId, actorId);
     const expiresAt = expiresInHours ? new Date(Date.now() + expiresInHours * 3600_000) : null;
-    return this.links.create({ boardId, role, createdBy: actorId, token: randomToken(), expiresAt });
+    const link = await this.links.create({ boardId, role, createdBy: actorId, token: randomToken(), expiresAt });
+    // KHÔNG ghi token vào log: ai đọc được log sẽ vào được bảng
+    await this.audit.record({ action: 'share_link.create', actorId, boardId, metadata: { linkId: link.id, role, expiresAt: expiresAt?.toISOString() ?? null } });
+    return link;
   }
 
   async listLinks(boardId: string, actorId: string) {
@@ -106,6 +113,7 @@ export class SharingService {
   async revokeLink(boardId: string, actorId: string, linkId: string) {
     await this.requireOwner(boardId, actorId);
     if ((await this.links.revoke(boardId, linkId)) === 0) throw new AppError('SHARE_LINK_NOT_FOUND');
+    await this.audit.record({ action: 'share_link.revoke', actorId, boardId, metadata: { linkId } });
     // shortcut: ai đang JoinBoard bằng link ĐÚNG lúc thu hồi (đã đọc link còn hạn, chưa kịp vào room share:) thì sót lại tới lần nối lại sau.
     this.emitter.kickFromBoard(shareRoom(linkId), 'link_revoked');
   }
@@ -125,6 +133,7 @@ export class SharingService {
       expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
     });
     // shortcut: chưa chặn mời người đã là thành viên / mời trùng email; chấp nhận vẫn an toàn (addIfMissing giữ vai trò cũ).
+    await this.audit.record({ action: 'invitation.create', actorId, boardId, metadata: { invitationId: invitation.id, email, role } });
     this.events.emit(BOARD_INVITATION_CREATED, {
       invitationId: invitation.id,
       email,
@@ -143,6 +152,7 @@ export class SharingService {
   async revokeInvitation(boardId: string, actorId: string, invitationId: string) {
     await this.requireOwner(boardId, actorId);
     if ((await this.invitations.revoke(boardId, invitationId)) === 0) throw new AppError('INVITATION_NOT_FOUND');
+    await this.audit.record({ action: 'invitation.revoke', actorId, boardId, metadata: { invitationId } });
   }
 
   async acceptInvitation(userId: string, token: string) {
@@ -155,6 +165,12 @@ export class SharingService {
     const member = await this.prisma.$transaction(async (tx) => {
       if ((await this.invitations.markAccepted(invitation.id, tx)) === 0) throw new AppError('INVALID_INVITATION'); // vừa bị thu hồi/dùng
       return this.members.addIfMissing(invitation.boardId, userId, invitation.role, tx);
+    });
+    await this.audit.record({
+      action: 'invitation.accept',
+      actorId: userId,
+      boardId: invitation.boardId,
+      metadata: { invitationId: invitation.id, role: member.role }, // role thật sau khi nhận (đã là thành viên thì giữ vai trò cũ)
     });
     return { boardId: invitation.boardId, role: member.role };
   }

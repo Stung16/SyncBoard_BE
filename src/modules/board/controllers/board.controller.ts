@@ -3,9 +3,11 @@ import { z } from 'zod';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../../auth/types/auth.types.js';
 import {
+  auditLogQuerySchema,
   createBoardSchema,
   listBoardsSchema,
   renameBoardSchema,
+  type AuditLogQueryDto,
   type CreateBoardDto,
   type ListBoardsDto,
   type RenameBoardDto,
@@ -32,6 +34,12 @@ export class BoardController {
   @Get(':boardId')
   get(@Param('boardId', uuid) boardId: string, @CurrentUser() user: AuthUser) {
     return this.boards.get(boardId, user.id);
+  }
+
+  // Nhật ký: chỉ OWNER. ?before=<id dòng cuối trang trước> để xem trang sau.
+  @Get(':boardId/audit-logs')
+  auditLog(@Param('boardId', uuid) boardId: string, @Query({ schema: auditLogQuerySchema }) { before }: AuditLogQueryDto, @CurrentUser() user: AuthUser) {
+    return this.boards.auditLog(boardId, user.id, before);
   }
 
   // Đổi tên, xóa: chỉ OWNER (8.1). Service kiểm.

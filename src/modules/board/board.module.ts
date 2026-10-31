@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { StorageModule } from '../../infra/storage/storage.module.js';
+import { AuditModule } from '../audit/audit.module.js';
 import { UserModule } from '../user/user.module.js';
 import { BoardLocks } from './board-locks.js';
 import { AssetController } from './controllers/asset.controller.js';
@@ -22,7 +23,7 @@ import { SharingService } from './services/sharing.service.js';
 import { SnapshotService } from './services/snapshot.service.js';
 
 @Module({
-  imports: [UserModule, StorageModule], // UserModule: email/tên cho lời mời; StorageModule: file ảnh
+  imports: [UserModule, StorageModule, AuditModule], // UserModule: email/tên cho lời mời; StorageModule: file ảnh
   controllers: [BoardController, SharingController, SnapshotController, AssetController],
   providers: [
     BoardService,

@@ -11,6 +11,7 @@ import {
   AllExceptionsFilter,
   type ApiError,
 } from './common/filters/all-exceptions.filter.js';
+import { RequestContextInterceptor } from './common/interceptors/request-context.interceptor.js';
 import { API_PREFIX } from './config/api-prefix.js';
 import { requestLogger } from './common/middleware/request-logger.js';
 import type { Env } from './config/env.validation.js';
@@ -59,6 +60,7 @@ export async function setupApp(app: INestApplication) {
     }),
   );
   app.useGlobalFilters(new AllExceptionsFilter());
+  app.useGlobalInterceptors(new RequestContextInterceptor()); // IP request cho audit log (currentIp())
 
   const adapter = new SocketIoAdapter(
     app,

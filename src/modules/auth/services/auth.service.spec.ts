@@ -23,7 +23,7 @@ describe('AuthService.register', () => {
   };
   const service = new AuthService(
     deps.prisma as never, deps.users as never, deps.sessions as never, deps.verification as never,
-    deps.events as never, deps.jwt as never, {} as never,
+    deps.events as never, deps.jwt as never, {} as never, { record: vi.fn() } as never,
   );
   const dto = { email: 'an@mail.com', password: 'secret-pass', displayName: 'An' };
 
@@ -78,7 +78,7 @@ describe('AuthService.resendVerification', () => {
   };
   const service = new AuthService(
     deps.prisma as never, deps.users as never, {} as never, deps.verification as never,
-    deps.events as never, {} as never, deps.redis as never,
+    deps.events as never, {} as never, deps.redis as never, { record: vi.fn() } as never,
   );
 
   beforeEach(() => vi.clearAllMocks());
@@ -130,7 +130,7 @@ describe('AuthService.forgotPassword / resetPassword', () => {
   };
   const service = new AuthService(
     deps.prisma as never, deps.users as never, deps.sessions as never, deps.verification as never,
-    deps.events as never, {} as never, deps.redis as never,
+    deps.events as never, {} as never, deps.redis as never, { record: vi.fn() } as never,
   );
 
   beforeEach(() => vi.clearAllMocks());

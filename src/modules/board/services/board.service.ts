@@ -14,6 +14,7 @@ import { BoardRepository } from '../repositories/board.repository.js';
 import { ElementRepository } from '../repositories/element.repository.js';
 import { AssetRepository } from '../repositories/asset.repository.js';
 import { OperationRepository } from '../repositories/operation.repository.js';
+import { AuditService } from '../../audit/services/audit.service.js';
 import { SharingService } from './sharing.service.js';
 
 export type RejectedOp = { opId: string; reason: RejectReason; current?: ElementState };
@@ -36,10 +37,13 @@ export class BoardService {
     private readonly sharing: SharingService,
     private readonly locks: BoardLocks,
     private readonly emitter: SocketEmitter,
+    private readonly audit: AuditService,
   ) {}
 
-  create(ownerId: string, title?: string) {
-    return this.boards.create(ownerId, title);
+  async create(ownerId: string, title?: string) {
+    const board = await this.boards.create(ownerId, title);
+    await this.audit.record({ action: 'board.create', actorId: ownerId, boardId: board.id, metadata: { title: board.title } });
+    return board;
   }
 
   async list(userId: string, search?: string) {
@@ -55,6 +59,7 @@ export class BoardService {
   async rename(boardId: string, userId: string, title: string) {
     await this.sharing.authorize(boardId, userId, 'renameOrDeleteBoard');
     const board = await this.boards.rename(boardId, title);
+    await this.audit.record({ action: 'board.rename', actorId: userId, boardId, metadata: { title } });
     this.emitter.toBoard(boardId, 'BoardRenamed', { title }); // người đang mở bảng thấy tên mới ngay
     return board;
   }
@@ -63,7 +68,14 @@ export class BoardService {
   async remove(boardId: string, userId: string) {
     await this.sharing.authorize(boardId, userId, 'renameOrDeleteBoard');
     await this.boards.softDelete(boardId);
+    await this.audit.record({ action: 'board.delete', actorId: userId, boardId });
     this.emitter.kickFromBoard(`board:${boardId}`, 'board_deleted');
+  }
+
+  // Nhật ký hoạt động của bảng: chỉ chủ bảng xem (cùng nhóm quyền với quản lý chia sẻ, 8.1).
+  async auditLog(boardId: string, userId: string, before?: string) {
+    await this.sharing.authorize(boardId, userId, 'manageSharing');
+    return this.audit.listForBoard(boardId, before);
   }
 
   // Ảnh chụp bảng cho người vừa vào. RepeatableRead: 2 câu đọc thấy CÙNG một thời điểm (last_seq khớp elements).
@@ -97,7 +109,7 @@ export class BoardService {
 
   // boardId + actor do gateway lấy từ client.data, KHÔNG BAO GIỜ từ payload. Quyền (can) gateway đã kiểm.
   async submitOps(boardId: string, actor: string, ops: OpDto[]) {
-    return this.locks.run(boardId, async () => {
+    const outcome = await this.locks.run(boardId, async () => {
       const result = await this.prisma.$transaction(
         async (tx) => {
           const lastSeq = await this.boards.lockForUpdate(boardId, tx);
@@ -181,6 +193,12 @@ export class BoardService {
       if (result.applied.length > 0) this.emitter.toBoard(boardId, 'OpsApplied', result.applied);
       return result;
     });
+
+    // Xóa sạch bảng ảnh hưởng mọi người -> ghi audit. Ngoài lock: ghi log không được làm chậm các lô đang xếp hàng.
+    // Từng nét vẽ thì KHÔNG ghi (đã có bảng operations).
+    const cleared = outcome.applied.find((a) => a.type === 'clear');
+    if (cleared) await this.audit.record({ action: 'board.clear', actorId: actor, boardId, metadata: { seq: cleared.seq, count: cleared.clearedIds.length } });
+    return outcome;
   }
 
   // null = không đổi (đã ở đầu đó). Xem domain/z-index.ts để biết near/far là gì.
