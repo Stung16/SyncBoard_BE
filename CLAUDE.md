@@ -4,7 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Setup done: config, full DB schema (16 tables incl. auth/sessions/invitations/audit), Prisma migrations, Redis + Socket.IO sharded Redis adapter (multi-node), health check (DB + Redis), gateway shell with Zod validation, e2e harness incl. a two-node test. Business logic files (`board-locks.ts`, `domain/*`, `presence-tracker.ts`) are intentionally empty — the user writes them; their specs hold `it.todo` cases. Documents are written in Vietnamese; keep that language when editing them.
+The whole build order in `docs/research/implementation-guide.md` (GĐ1–GĐ5) is implemented and tested:
+- **Auth:** auth, users.
+- **Board:**
+  - ops: add / update / delete / restore incl. undo clear, reorder, clear.
+  - element types: freedraw, shapes, line/arrow, text, sticky, frame, image.
+  - also: the operations log with dedupe + MissedOps, and board list / rename / delete.
+- **Realtime:** presence, soft text lock, token-bucket rate limit, Ping.
+- **Sharing:** members, share links, email invitations, AccessChanged kicks.
+- **Snapshots:** periodic capture, restore, operations pruning.
+- **Other:**
+  - image upload (`infra/storage`, local disk)
+  - graceful shutdown
+  - comments with mentions and notifications (room `user:{id}`)
+
+Not built yet (in the spec, outside the build order): stamp (5.4), shared timer (5.6), templates (5.9), export/import (7.2), `audit_logs` writes. Documents are written in Vietnamese; keep that language when editing them.
 
 ## Commands
 
