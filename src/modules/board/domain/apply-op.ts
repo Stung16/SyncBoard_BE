@@ -38,6 +38,7 @@ export type RejectReason =
   | 'invalid_patch'
   | 'invalid_data'
   | 'no_change' // reorder khi đã ở trên cùng / dưới cùng
+  | 'asset_not_found' // op image trỏ tới ảnh không có / của bảng khác (service kiểm, domain không query)
   | 'unsupported_op';
 
 export type ApplyResult =

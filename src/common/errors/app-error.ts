@@ -59,6 +59,14 @@ export const ERRORS = {
     status: HttpStatus.NOT_FOUND,
     message: 'Phiên bản không tồn tại',
   },
+  INVALID_IMAGE: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'Chỉ nhận ảnh PNG, JPEG, GIF hoặc WebP',
+  },
+  ASSET_NOT_FOUND: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'Ảnh không tồn tại',
+  },
   SHUTTING_DOWN: {
     status: HttpStatus.SERVICE_UNAVAILABLE,
     message: 'Máy chủ đang khởi động lại, vui lòng thử lại',

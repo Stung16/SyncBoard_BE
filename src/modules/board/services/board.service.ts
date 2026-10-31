@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { generateKeyBetween } from 'fractional-indexing';
+import { z } from 'zod';
 import { AppError } from '../../../common/errors/app-error.js';
 import type { Element, Operation, Prisma } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../infra/database/prisma.service.js';
@@ -11,6 +12,7 @@ import type { ElementType } from '../dto/element.dto.js';
 import type { OpDto } from '../dto/op.dto.js';
 import { BoardRepository } from '../repositories/board.repository.js';
 import { ElementRepository } from '../repositories/element.repository.js';
+import { AssetRepository } from '../repositories/asset.repository.js';
 import { OperationRepository } from '../repositories/operation.repository.js';
 
 export type RejectedOp = { opId: string; reason: RejectReason; current?: ElementState };
@@ -26,6 +28,7 @@ export class BoardService {
     private readonly boards: BoardRepository,
     private readonly elements: ElementRepository,
     private readonly operations: OperationRepository,
+    private readonly assets: AssetRepository,
     private readonly locks: BoardLocks,
     private readonly emitter: SocketEmitter,
   ) {}
@@ -92,6 +95,10 @@ export class BoardService {
             const ids = [...new Set(fresh.map(targetId).filter((id) => id !== undefined))];
             const state = new Map((await this.elements.findMany(boardId, ids, tx)).map((r) => [r.id, toState(r)]));
 
+            // Ảnh: assetId phải là asset của ĐÚNG bảng này (không cho dán ảnh bảng khác sang). Một query cho cả lô.
+            const assetIds = [...new Set(fresh.map(assetIdOf).filter((a) => a !== undefined))];
+            const knownAssets = new Set(assetIds.length ? await this.assets.findIdsOfBoard(boardId, assetIds, tx) : []);
+
             let top = await this.elements.maxZIndex(boardId, tx);
             const ctx = { actor, zIndexFor: () => (top = generateKeyBetween(top, null)) }; // mỗi add mới nằm trên cùng
 
@@ -110,6 +117,11 @@ export class BoardService {
 
               const id = targetId(op);
               const current = id === undefined ? undefined : state.get(id);
+              const assetId = assetIdOf(op);
+              if (assetId !== undefined && !knownAssets.has(assetId)) {
+                rejected.push({ opId: op.opId, reason: 'asset_not_found', current });
+                continue;
+              }
               // reorder: zIndex mới tính từ hàng xóm đọc TRONG tx (thấy cả op trước trong lô). Không hợp lệ thì để domain từ chối.
               const reorderTo =
                 op.type === 'reorder' && current && !current.isDeleted && !current.locked
@@ -170,6 +182,13 @@ export class BoardService {
 
 const targetId = (op: OpDto): string | undefined =>
   op.type === 'add' ? op.element.id : op.type === 'clear' ? undefined : op.elementId;
+
+// assetId mà op muốn gắn vào element: add image, hoặc update đổi ảnh. Không phải UUID thì để domain từ chối (invalid_patch),
+// đừng đưa vào query: cột uuid sẽ ném lỗi Prisma.
+const assetIdOf = (op: OpDto): string | undefined => {
+  const v = op.type === 'add' && op.element.type === 'image' ? op.element.data.assetId : op.type === 'update' ? op.patch['assetId'] : undefined;
+  return typeof v === 'string' && z.uuid().safeParse(v).success ? v : undefined;
+};
 
 // Cùng opId xuất hiện 2 lần trong một lô (client lỗi) -> giữ cái đầu
 const uniqueByOpId = (ops: OpDto[]) => {

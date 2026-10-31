@@ -79,7 +79,8 @@ export const elementDataSchemas = {
   line: linearData,
   arrow: linearData,
   frame: z.strictObject({ x: coord, y: coord, width: size, height: size, name: z.string().max(100) }), // 5.7
-  // image: thêm cùng upload asset
+  // assetId = ảnh đã upload qua REST (2.10); BoardService kiểm asset đó thuộc đúng bảng
+  image: z.strictObject({ x: coord, y: coord, width: size, height: size, angle: z.number(), assetId: z.uuid() }),
 };
 export type ElementType = keyof typeof elementDataSchemas;
 
@@ -104,6 +105,7 @@ export const elementSchema = z.discriminatedUnion('type', [
   }),
   z.strictObject({ ...base, type: z.enum(['line', 'arrow']), data: linearData }),
   z.strictObject({ ...base, type: z.literal('frame'), data: elementDataSchemas.frame }),
+  z.strictObject({ ...base, type: z.literal('image'), data: elementDataSchemas.image }),
   z.strictObject({ ...base, type: z.literal('text'), data: elementDataSchemas.text }),
   z.strictObject({ ...base, type: z.literal('sticky'), data: elementDataSchemas.sticky }),
 ]);

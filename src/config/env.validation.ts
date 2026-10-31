@@ -17,6 +17,8 @@ export const envSchema = z
     REFRESH_TTL_DAYS: z.coerce.number().int().min(1).default(30),
     APP_URL: z.url().default('http://localhost:5173'), // để dựng link trong email
 
+    UPLOAD_DIR: z.string().min(1).default('uploads'), // LocalDiskStorage; tương đối thì tính từ thư mục chạy app
+
     TRUST_PROXY: z.coerce.number().int().min(0).default(0), // số proxy đứng trước app; 0 = chạy thẳng (dev)
 
     // Google OAuth: tùy chọn. Không đặt GOOGLE_CLIENT_ID thì tắt đăng nhập Google (route trả 404).
