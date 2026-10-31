@@ -42,6 +42,24 @@ export class ElementRepository {
       select: { id: true },
     });
   }
+
+  // Khôi phục phiên bản: ẩn MỌI element đang hiện (kể cả bị khóa), rồi restoreTo bật lại đúng những cái trong bản chụp.
+  hideAll(boardId: string, actor: string, db: Db) {
+    return db.element.updateMany({
+      where: { boardId, isDeleted: false },
+      data: { isDeleted: true, version: { increment: 1 }, updatedBy: actor },
+    });
+  }
+
+  // Giữ dòng cũ (upsert, không xóa-tạo lại) để undo/tham chiếu tới id vẫn chạy. version tăng -> op cũ của client đang mở sẽ bị conflict.
+  restoreTo(boardId: string, el: ElementState, actor: string, db: Db) {
+    const { id, version, ...rest } = columns({ ...el, isDeleted: false, updatedBy: actor });
+    return db.element.upsert({
+      where: { boardId_id: { boardId, id } },
+      create: { boardId, id, version, ...rest },
+      update: { ...rest, version: { increment: 1 } },
+    });
+  }
 }
 
 // ElementState (domain) -> cột DB. data là JSON nên cần ép kiểu cho Prisma.

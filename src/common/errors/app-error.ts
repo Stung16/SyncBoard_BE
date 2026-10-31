@@ -55,6 +55,10 @@ export const ERRORS = {
     status: HttpStatus.NOT_FOUND,
     message: 'Link chia sẻ không tồn tại hoặc đã bị thu hồi',
   },
+  SNAPSHOT_NOT_FOUND: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'Phiên bản không tồn tại',
+  },
   INVITATION_NOT_FOUND: {
     status: HttpStatus.NOT_FOUND,
     message: 'Lời mời không tồn tại hoặc đã bị thu hồi',

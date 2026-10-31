@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { minutes, ThrottlerModule } from '@nestjs/throttler';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { envSchema } from './config/env.validation.js';
@@ -25,6 +26,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard.js';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validationSchema: envSchema }),
     EventEmitterModule.forRoot(), // global: inject EventEmitter2 ở đâu cũng được; quét mọi @OnEvent khi app khởi động
+    ScheduleModule.forRoot(), // gọi đúng MỘT lần ở đây; job (@Interval/@Cron) khai báo ở module của nó
     PrismaModule,
     RedisModule,
     ThrottlerModule.forRootAsync({

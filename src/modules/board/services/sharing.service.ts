@@ -5,7 +5,7 @@ import { randomToken, sha256 } from '../../../common/utils/token.util.js';
 import { PrismaService } from '../../../infra/database/prisma.service.js';
 import { SocketEmitter } from '../../../infra/socket/socket-emitter.service.js';
 import { UserService } from '../../user/services/user.service.js';
-import { can, type Role } from '../domain/permissions.js';
+import { can, type Action, type Role } from '../domain/permissions.js';
 import type { ChangeRoleDto, CreateInvitationDto, CreateShareLinkDto } from '../dto/sharing.dto.js';
 import { BOARD_INVITATION_CREATED, type BoardInvitationCreatedEvent } from '../events/board-invitation-created.event.js';
 import { BoardRepository } from '../repositories/board.repository.js';
@@ -18,6 +18,9 @@ import { ShareLinkRepository } from '../repositories/share-link.repository.js';
 export type Access = { role: Role; room: string };
 const memberRoom = (boardId: string, userId: string) => `member:${boardId}:${userId}`;
 const shareRoom = (linkId: string) => `share:${linkId}`;
+// Vai trò không cần link: thành viên, hoặc bảng không chủ (seed demo) thì ai cũng EDITOR (8.1)
+const roleOf = (board: { ownerId: string | null; members: { role: Role }[] }): Role | null =>
+  board.members[0]?.role ?? (board.ownerId ? null : 'EDITOR');
 
 const INVITATION_TTL_MS = 7 * 24 * 3600_000;
 
@@ -39,14 +42,23 @@ export class SharingService {
     const board = await this.boards.findWithMember(boardId, userId);
     if (!board) return null;
     // Thành viên thì dùng vai trò thành viên, kể cả khi cầm link quyền cao hơn: chủ bảng đã chọn vai trò cho riêng người này.
-    const member = board.members[0];
-    if (member) return { role: member.role, room: memberRoom(boardId, userId) };
+    const role = roleOf(board);
+    if (role) return { role, room: memberRoom(boardId, userId) };
     if (shareToken) {
       const link = await this.links.findUsableByToken(boardId, shareToken);
       if (link) return { role: link.role, room: shareRoom(link.id) };
     }
-    if (!board.ownerId) return { role: 'EDITOR', room: memberRoom(boardId, userId) }; // bảng không chủ (seed demo): ai có link cũng sửa (8.1)
     return null;
+  }
+
+  // Kiểm quyền cho REST. 404 khi không có quyền gì (không lộ bảng tồn tại), 403 khi có vai trò nhưng không đủ.
+  // shortcut: REST chưa nhận share token -> người vào bằng link chỉ dùng được socket, không xem được lịch sử phiên bản.
+  async authorize(boardId: string, userId: string, action: Action) {
+    const board = await this.boards.findWithMember(boardId, userId);
+    const role = board && roleOf(board);
+    if (!board || !role) throw new AppError('BOARD_NOT_FOUND');
+    if (!can(role, action)) throw new AppError('BOARD_FORBIDDEN');
+    return board;
   }
 
   // --- Thành viên ---
@@ -142,13 +154,8 @@ export class SharingService {
     return { boardId: invitation.boardId, role: member.role };
   }
 
-  // 404 khi không có quyền gì (không lộ bảng tồn tại), 403 khi là thành viên nhưng không phải chủ.
-  private async requireOwner(boardId: string, actorId: string) {
-    const board = await this.boards.findWithMember(boardId, actorId);
-    const role = board?.members[0]?.role;
-    if (!board || !role) throw new AppError('BOARD_NOT_FOUND');
-    if (!can(role, 'manageSharing')) throw new AppError('BOARD_FORBIDDEN');
-    return board;
+  private requireOwner(boardId: string, actorId: string) {
+    return this.authorize(boardId, actorId, 'manageSharing');
   }
 
   private async requireNonOwnerMember(boardId: string, userId: string) {

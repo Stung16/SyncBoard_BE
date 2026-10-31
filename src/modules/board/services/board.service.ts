@@ -56,7 +56,8 @@ export class BoardService {
 
       const rows = await this.operations.findAfter(boardId, sinceSeq, MISSED_OPS_LIMIT + 1, tx);
       if (rows.length > MISSED_OPS_LIMIT) return null;
-      if (rows[0]?.seq !== sinceSeq + 1) return null; // thiếu khúc đầu (op cũ đã bị dọn, GĐ4) -> phát lại sẽ lệch
+      if (rows[0]?.seq !== sinceSeq + 1) return null; // thiếu khúc đầu (op cũ đã bị dọn) -> phát lại sẽ lệch
+      if (rows.some((r) => r.type === 'restore_snapshot')) return null; // khôi phục phiên bản thay cả bảng, không phát lại từng bước được
       return rows.map(toApplied);
     });
   }
@@ -135,7 +136,7 @@ const uniqueByOpId = (ops: OpDto[]) => {
 };
 
 // Dòng DB -> ElementState. Dữ liệu trong DB do chính server ghi (đã qua kiểm tra) nên ép kiểu được.
-const toState = (r: Element): ElementState => ({
+export const toState = (r: Element): ElementState => ({
   id: r.id,
   type: r.type as ElementType,
   data: r.data as Record<string, unknown>,
