@@ -39,6 +39,7 @@ REST prefix is the single constant `API_PREFIX` (`src/config/api-prefix.ts`, cur
 - `docs/research/nestjs-folder-structure.md` — researched folder structure with cited sources; the tree in section 4 is the one to follow.
 - `docs/research/setup-guide.md` — verified scaffolding steps, pinned versions, commands (incl. running a single test).
 - `docs/research/implementation-guide.md` — per-module logic, library APIs, pitfalls, build order with "xong khi" checks.
+- `docs/guides/fe-integration-guide.md` — the frontend contract (every REST route, socket event, op rule, error code, client-side use-case logic, known BE gaps). Update it whenever a route, payload, event or error code changes.
 - `docs/db/syncboard.dbml` — hand-copied DBML of the schema with per-table feature notes (for dbdiagram.io). `prisma/schema.prisma` is the source of truth; update the DBML when the schema changes.
 
 The user codes the project themselves from these guides: explain and review rather than writing whole modules unless asked.
