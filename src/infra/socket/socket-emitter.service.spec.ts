@@ -22,6 +22,15 @@ describe('SocketEmitter', () => {
     expect(f.emit).toHaveBeenCalledWith('CommentAdded', { id: 'c1' });
   });
 
+  it('toUser phát vào room user:{id}', () => {
+    const f = fakeServer();
+    const emitter = new SocketEmitter();
+    emitter.bind(f.server);
+    emitter.toUser('u1', 'NotificationCreated', { id: 'n1' });
+    expect(f.raw.to).toHaveBeenCalledWith('user:u1');
+    expect(f.emit).toHaveBeenCalledWith('NotificationCreated', { id: 'n1' });
+  });
+
   it('kickFromBoard gửi AccessChanged TRƯỚC rồi mới ngắt', () => {
     const f = fakeServer();
     const emitter = new SocketEmitter();

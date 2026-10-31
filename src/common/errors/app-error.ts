@@ -67,6 +67,18 @@ export const ERRORS = {
     status: HttpStatus.NOT_FOUND,
     message: 'Ảnh không tồn tại',
   },
+  COMMENT_NOT_FOUND: {
+    status: HttpStatus.NOT_FOUND,
+    message: 'Bình luận không tồn tại',
+  },
+  INVALID_PARENT_COMMENT: {
+    status: HttpStatus.BAD_REQUEST,
+    message: 'Chỉ trả lời được bình luận gốc của cùng bảng',
+  },
+  NOT_COMMENT_AUTHOR: {
+    status: HttpStatus.FORBIDDEN,
+    message: 'Chỉ người viết mới sửa được bình luận này',
+  },
   SHUTTING_DOWN: {
     status: HttpStatus.SERVICE_UNAVAILABLE,
     message: 'Máy chủ đang khởi động lại, vui lòng thử lại',

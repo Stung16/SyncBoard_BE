@@ -16,6 +16,11 @@ export class SocketEmitter {
     this.io().to(`board:${boardId}`).emit(event, data);
   }
 
+  // Mọi tab đang mở của một người (thông báo 5.2). Chỉ để GỬI tin; đừng dùng room này để ngắt (sẽ đá người đó khỏi MỌI bảng, 8.2).
+  toUser(userId: string, event: string, data: unknown) {
+    this.io().to(`user:${userId}`).emit(event, data);
+  }
+
   // 8.2: room = member:{boardId}:{userId} hoặc share:{linkId}
   kickFromBoard(room: string, reason: string) {
     const io = this.io();

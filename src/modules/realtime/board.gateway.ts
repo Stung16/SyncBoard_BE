@@ -65,13 +65,17 @@ export class BoardGateway implements OnGatewayInit, OnGatewayDisconnect {
     this.emitter.bind(server); // từ đây module khác phát tin qua SocketEmitter
     // Cổng vào: chạy MỘT lần lúc bắt tay, trước mọi tin. Sai/thiếu token -> client nhận connect_error, không vào được.
     server.use((socket, next) => {
-      void this.authenticate(socket).then(
-        () => {
+      void this.authenticate(socket)
+        .then(() => {
           this.limitRate(socket);
-          next();
-        },
-        () => next(new Error('unauthorized')),
-      );
+          // Room riêng của người dùng (nhận NotificationCreated ở bảng nào cũng được). Join TRƯỚC next(): client chỉ nhận
+          // "connect" khi đã ở trong room -> thông báo phát ngay sau đó không lọt. (handleConnection chạy SAU khi client đã connect.)
+          return socket.join(`user:${socket.data.userId}`);
+        })
+        .then(
+          () => next(),
+          () => next(new Error('unauthorized')), // token sai, hoặc join lỗi (Redis): đều từ chối, không để promise lỗi trôi
+        );
     });
   }
 

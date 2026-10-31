@@ -17,7 +17,9 @@ import { RedisThrottlerStorage } from './infra/redis/redis-throttler.storage.js'
 import { SocketEmitterModule } from './infra/socket/socket-emitter.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { BoardModule } from './modules/board/board.module.js';
+import { CommentModule } from './modules/comment/comment.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { NotificationModule } from './modules/notification/notification.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
 import { UserModule } from './modules/user/user.module.js';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard.js';
@@ -43,6 +45,8 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard.js';
     AuthModule,
     BoardModule,
     RealtimeModule,
+    NotificationModule,
+    CommentModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

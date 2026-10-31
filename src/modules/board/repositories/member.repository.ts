@@ -17,6 +17,11 @@ export class MemberRepository {
     });
   }
 
+  async findUserIds(boardId: string, userIds: string[]) {
+    const rows = await this.prisma.boardMember.findMany({ where: { boardId, userId: { in: userIds } }, select: { userId: true } });
+    return rows.map((r) => r.userId);
+  }
+
   find(boardId: string, userId: string) {
     return this.prisma.boardMember.findUnique({ where: { boardId_userId: { boardId, userId } }, select: { role: true } });
   }

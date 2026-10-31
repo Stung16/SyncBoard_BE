@@ -63,6 +63,11 @@ export class SharingService {
 
   // --- Thành viên ---
 
+  // Những id trong danh sách là thành viên bảng (mention chỉ báo cho thành viên: không báo người ngoài, không lộ ai có quyền).
+  filterMembers(boardId: string, userIds: string[]) {
+    return userIds.length ? this.members.findUserIds(boardId, userIds) : Promise.resolve([]);
+  }
+
   async listMembers(boardId: string, actorId: string) {
     await this.requireOwner(boardId, actorId);
     return (await this.members.list(boardId)).map(({ role, user: { id, ...user } }) => ({ userId: id, ...user, role }));
